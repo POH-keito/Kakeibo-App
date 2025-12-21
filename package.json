@@ -1,0 +1,23 @@
+{
+  "name": "kakeibo-app",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "dev": "concurrently \"npm run dev -w backend\" \"npm run dev -w frontend\"",
+    "build": "npm run build -w backend && npm run build -w frontend",
+    "start": "npm run start -w backend",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
+    "test:codegen": "playwright codegen http://localhost:3000"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.57.0",
+    "concurrently": "^9.1.2",
+    "typescript": "^5.7.3"
+  }
+}
