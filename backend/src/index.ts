@@ -8,6 +8,9 @@ import masterRoutes from './routes/master.js';
 import transactionRoutes from './routes/transactions.js';
 import memoRoutes from './routes/memos.js';
 import aiRoutes from './routes/ai.js';
+import sharesRoutes from './routes/shares.js';
+import importRoutes from './routes/import.js';
+import tagsRoutes from './routes/tags.js';
 
 // Create app with type variables for context
 const app = new Hono<{
@@ -43,6 +46,9 @@ api.route('/master', masterRoutes);
 api.route('/transactions', transactionRoutes);
 api.route('/memos', memoRoutes);
 api.route('/ai', aiRoutes);
+api.route('/shares', sharesRoutes);
+api.route('/import', importRoutes);
+api.route('/tags', tagsRoutes);
 
 // Export type for RPC client
 export type AppType = typeof app;

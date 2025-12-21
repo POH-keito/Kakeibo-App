@@ -62,7 +62,7 @@ class NCBClient {
       throw new Error(`NCB API Error: ${res.status} ${error}`);
     }
 
-    return res.json();
+    return res.json() as Promise<T>;
   }
 
   async list<T>(table: string, options?: NCBQueryOptions): Promise<T[]> {
@@ -98,7 +98,7 @@ class NCBClient {
       throw new Error(`NCB API Error: ${res.status} ${error}`);
     }
 
-    const response = await res.json();
+    const response = await res.json() as NCBResponse<T>;
     return response.data || [];
   }
 
@@ -142,7 +142,7 @@ class NCBClient {
       throw new Error(`NCB API Error: ${res.status} ${error}`);
     }
 
-    const response = await res.json();
+    const response = await res.json() as NCBResponse<T>;
     return response.data || [];
   }
 }
