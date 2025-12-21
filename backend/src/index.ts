@@ -1,3 +1,8 @@
+import { config } from 'dotenv';
+import { resolve } from 'path';
+// Load .env.local from project root (parent of backend workspace)
+config({ path: resolve(process.cwd(), '..', '.env.local') });
+
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';

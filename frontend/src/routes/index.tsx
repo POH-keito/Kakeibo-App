@@ -60,7 +60,7 @@ function DashboardPage() {
     return burdenRatio.details
       .map((d) => {
         const user = users.find((u) => u.id === d.user_id);
-        return `${user?.aliases[0] || user?.name}: ${d.percentage}%`;
+        return `${user?.aliases[0] || user?.name}: ${d.ratio_percent}%`;
       })
       .join(' / ');
   }, [burdenRatio, users]);

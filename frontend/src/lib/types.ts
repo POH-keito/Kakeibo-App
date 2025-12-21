@@ -37,28 +37,29 @@ export interface Tag {
 
 export interface TransactionShare {
   id: number;
-  transaction_id: number;
+  moneyforward_id: string;
   user_id: number;
-  amount: number;
+  share_amount: number;
 }
 
 export interface TransactionShareOverride {
   id: number;
-  transaction_id: number;
+  moneyforward_id: string;
   user_id: number;
-  amount: number;
+  override_type: 'PERCENT' | 'FIXED_AMOUNT';
+  value: number;
 }
 
 export interface TransactionTag {
   id: number;
-  transaction_id: number;
+  moneyforward_id: string;
   tag_id: number;
 }
 
 export interface BurdenRatio {
   id: number;
   household_id: number;
-  target_month: string;
+  effective_month: string;
   details: BurdenRatioDetail[];
 }
 
@@ -66,7 +67,7 @@ export interface BurdenRatioDetail {
   id: number;
   burden_ratio_id: number;
   user_id: number;
-  percentage: number;
+  ratio_percent: number;
 }
 
 export interface MonthlyMemo {
