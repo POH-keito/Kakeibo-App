@@ -11,10 +11,25 @@ import {
   calculateCostTypeSummary,
   calculateCategorySummary,
 } from '../lib/api';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
 export const Route = createFileRoute('/')({
   component: DashboardPage,
 });
+
+// Color palette for pie chart
+const COLORS = [
+  '#2b6cb0', // Blue
+  '#4299e1', // Light Blue
+  '#2f855a', // Green
+  '#e53e3e', // Red
+  '#d69e2e', // Yellow
+  '#805ad5', // Purple
+  '#38b2ac', // Teal
+  '#ed8936', // Orange
+  '#dd6b20', // Dark Orange
+  '#718096', // Gray
+];
 
 function DashboardPage() {
   const now = new Date();
