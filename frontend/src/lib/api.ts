@@ -70,38 +70,38 @@ export function useTransactions(year: string, month: string, includeTagged = fal
   });
 }
 
-export function useTransactionShares(transactionIds: number[]) {
+export function useTransactionShares(moneyforwardIds: string[]) {
   return useQuery({
-    queryKey: ['transaction-shares', transactionIds],
+    queryKey: ['transaction-shares', moneyforwardIds],
     queryFn: () =>
-      transactionIds.length > 0
-        ? fetchApi<TransactionShare[]>(`/transactions/shares?ids=${transactionIds.join(',')}`)
+      moneyforwardIds.length > 0
+        ? fetchApi<TransactionShare[]>(`/transactions/shares?ids=${moneyforwardIds.join(',')}`)
         : Promise.resolve([]),
-    enabled: transactionIds.length > 0,
+    enabled: moneyforwardIds.length > 0,
   });
 }
 
-export function useTransactionOverrides(transactionIds: number[]) {
+export function useTransactionOverrides(moneyforwardIds: string[]) {
   return useQuery({
-    queryKey: ['transaction-overrides', transactionIds],
+    queryKey: ['transaction-overrides', moneyforwardIds],
     queryFn: () =>
-      transactionIds.length > 0
+      moneyforwardIds.length > 0
         ? fetchApi<TransactionShareOverride[]>(
-            `/transactions/overrides?ids=${transactionIds.join(',')}`
+            `/transactions/overrides?ids=${moneyforwardIds.join(',')}`
           )
         : Promise.resolve([]),
-    enabled: transactionIds.length > 0,
+    enabled: moneyforwardIds.length > 0,
   });
 }
 
-export function useTransactionTags(transactionIds: number[]) {
+export function useTransactionTags(moneyforwardIds: string[]) {
   return useQuery({
-    queryKey: ['transaction-tags', transactionIds],
+    queryKey: ['transaction-tags', moneyforwardIds],
     queryFn: () =>
-      transactionIds.length > 0
-        ? fetchApi<TransactionTag[]>(`/transactions/tags?ids=${transactionIds.join(',')}`)
+      moneyforwardIds.length > 0
+        ? fetchApi<TransactionTag[]>(`/transactions/tags?ids=${moneyforwardIds.join(',')}`)
         : Promise.resolve([]),
-    enabled: transactionIds.length > 0,
+    enabled: moneyforwardIds.length > 0,
   });
 }
 
@@ -133,20 +133,20 @@ export function useEnrichedTransactions(year: string, month: string, includeTagg
   const { data: categories = [] } = useCategories();
   const { data: users = [] } = useUsers();
 
-  const transactionIds = transactions.map((tx) => tx.id);
-  const { data: shares = [] } = useTransactionShares(transactionIds);
-  const { data: overrides = [] } = useTransactionOverrides(transactionIds);
+  const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id);
+  const { data: shares = [] } = useTransactionShares(moneyforwardIds);
+  const { data: overrides = [] } = useTransactionOverrides(moneyforwardIds);
 
   const enrichedTransactions: EnrichedTransaction[] = transactions.map((tx) => {
     const category = categories.find((c) => c.id === tx.category_id);
-    const txShares = shares.filter((s) => s.transaction_id === tx.id);
-    const txOverrides = overrides.filter((o) => o.transaction_id === tx.id);
+    const txShares = shares.filter((s) => s.moneyforward_id === tx.moneyforward_id);
+    const txOverrides = overrides.filter((o) => o.moneyforward_id === tx.moneyforward_id);
     const hasOverrides = txOverrides.length > 0;
 
     // Build user shares
     const userShares = txShares.map((share) => {
       const override = txOverrides.find((o) => o.user_id === share.user_id);
-      const amount = override ? override.amount : share.amount;
+      const amount = override ? override.value : share.share_amount;
       const user = users.find((u) => u.id === share.user_id);
       const totalAmount = Math.abs(tx.amount);
       const percent = totalAmount > 0 ? (amount / totalAmount) * 100 : 0;
