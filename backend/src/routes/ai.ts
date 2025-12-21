@@ -26,6 +26,14 @@ interface AnalysisRequest {
   userMessage?: string;
 }
 
+interface GeminiResponse {
+  candidates?: Array<{
+    content?: {
+      parts?: Array<{ text?: string }>;
+    };
+  }>;
+}
+
 const SYSTEM_PROMPT = `あなたは家計アドバイザーです。
 2人世帯（夫婦）の家計を分析し、アドバイスを提供してください。
 
@@ -118,7 +126,7 @@ ${Object.entries(summary.userShares)
       return c.json({ error: 'AI analysis failed' }, 500);
     }
 
-    const data = await response.json();
+    const data = await response.json() as GeminiResponse;
     const aiResponse = data.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     // Return updated history

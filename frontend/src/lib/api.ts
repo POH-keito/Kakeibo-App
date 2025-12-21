@@ -198,6 +198,60 @@ export function useSaveMonthlyMemo() {
   });
 }
 
+// Tag mutation hooks
+export function useCreateTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ name, color }: { name: string; color?: string }) =>
+      fetchApi<Tag>('/tags', {
+        method: 'POST',
+        body: JSON.stringify({ name, color }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+    },
+  });
+}
+
+export function useUpdateTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ id, name, color }: { id: number; name?: string; color?: string }) =>
+      fetchApi<Tag>(`/tags/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ name, color }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+    },
+  });
+}
+
+export function useDeleteTag() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: number) =>
+      fetchApi<{ success: boolean }>(`/tags/${id}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tags'] });
+    },
+  });
+}
+
+export function useTagTransactionCount(tagId: number | null) {
+  return useQuery({
+    queryKey: ['tag-transactions', tagId],
+    queryFn: () =>
+      tagId ? fetchApi<{ tag_id: number; transaction_count: number }>(`/tags/${tagId}/transactions`) : null,
+    enabled: !!tagId,
+  });
+}
+
 // AI analysis hooks
 export function useAIAnalysis() {
   return useMutation({
