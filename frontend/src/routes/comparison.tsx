@@ -1,18 +1,260 @@
 import { createFileRoute } from '@tanstack/react-router';
+import { useMemo } from 'react';
+import { useQueries } from '@tanstack/react-query';
+import { useCategories, useUsers } from '../lib/api';
+import type { Transaction, MonthlySummary } from '../lib/types';
 
 export const Route = createFileRoute('/comparison')({
   component: ComparisonPage,
 });
 
+const API_BASE = '/api';
+
+async function fetchTransactions(year: string, month: string): Promise<Transaction[]> {
+  const res = await fetch(
+    `${API_BASE}/transactions?year=${year}&month=${month}&includeTagged=false`
+  );
+  if (!res.ok) throw new Error('Failed to fetch');
+  return res.json();
+}
+
+async function fetchSummary(year: string, month: string): Promise<MonthlySummary> {
+  const res = await fetch(
+    `${API_BASE}/transactions/summary?year=${year}&month=${month}&includeTagged=false`
+  );
+  if (!res.ok) throw new Error('Failed to fetch');
+  return res.json();
+}
+
 function ComparisonPage() {
+  const { data: categories = [] } = useCategories();
+  const { data: users = [] } = useUsers();
+
+  // Get last 4 months
+  const months = useMemo(() => {
+    const result: { year: string; month: string; label: string }[] = [];
+    const now = new Date();
+    for (let i = 0; i < 4; i++) {
+      const date = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      result.push({
+        year: date.getFullYear().toString(),
+        month: (date.getMonth() + 1).toString().padStart(2, '0'),
+        label: `${date.getFullYear()}/${(date.getMonth() + 1).toString().padStart(2, '0')}`,
+      });
+    }
+    return result.reverse();
+  }, []);
+
+  // Fetch data for all months
+  const transactionQueries = useQueries({
+    queries: months.map((m) => ({
+      queryKey: ['transactions', m.year, m.month, false],
+      queryFn: () => fetchTransactions(m.year, m.month),
+    })),
+  });
+
+  const summaryQueries = useQueries({
+    queries: months.map((m) => ({
+      queryKey: ['monthly-summary', m.year, m.month, false],
+      queryFn: () => fetchSummary(m.year, m.month),
+    })),
+  });
+
+  const isLoading = transactionQueries.some((q) => q.isLoading) || summaryQueries.some((q) => q.isLoading);
+
+  // Calculate category totals for each month
+  const categoryByMonth = useMemo(() => {
+    const result: Record<string, Record<string, number>> = {};
+
+    transactionQueries.forEach((query, idx) => {
+      const transactions = query.data || [];
+      const monthLabel = months[idx].label;
+
+      transactions
+        .filter((tx) => tx.processing_status === '按分_家計')
+        .forEach((tx) => {
+          const category = categories.find((c) => c.id === tx.category_id);
+          const majorName = category?.major_name || '未分類';
+
+          if (!result[majorName]) {
+            result[majorName] = {};
+          }
+          if (!result[majorName][monthLabel]) {
+            result[majorName][monthLabel] = 0;
+          }
+          result[majorName][monthLabel] += Math.abs(tx.amount);
+        });
+    });
+
+    return result;
+  }, [transactionQueries, categories, months]);
+
+  // Calculate cost type totals for each month
+  const costTypeByMonth = useMemo(() => {
+    const result: Record<string, Record<string, number>> = {};
+
+    transactionQueries.forEach((query, idx) => {
+      const transactions = query.data || [];
+      const monthLabel = months[idx].label;
+
+      transactions
+        .filter((tx) => tx.processing_status === '按分_家計')
+        .forEach((tx) => {
+          const category = categories.find((c) => c.id === tx.category_id);
+          const costType = category?.cost_type || '未分類';
+
+          if (!result[costType]) {
+            result[costType] = {};
+          }
+          if (!result[costType][monthLabel]) {
+            result[costType][monthLabel] = 0;
+          }
+          result[costType][monthLabel] += Math.abs(tx.amount);
+        });
+    });
+
+    return result;
+  }, [transactionQueries, categories, months]);
+
+  // User shares by month
+  const userSharesByMonth = useMemo(() => {
+    const result: Record<number, Record<string, number>> = {};
+
+    summaryQueries.forEach((query, idx) => {
+      const summary = query.data;
+      const monthLabel = months[idx].label;
+
+      if (summary?.userShares) {
+        Object.entries(summary.userShares).forEach(([userIdStr, amount]) => {
+          const userId = Number(userIdStr);
+          if (!result[userId]) {
+            result[userId] = {};
+          }
+          result[userId][monthLabel] = amount;
+        });
+      }
+    });
+
+    return result;
+  }, [summaryQueries, months]);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="text-lg text-gray-600">読み込み中...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-gray-900">月次比較</h2>
 
+      {/* Category Comparison Table */}
+      <div className="overflow-x-auto rounded-lg bg-white p-6 shadow">
+        <h3 className="mb-4 text-lg font-semibold">カテゴリ別月次推移</h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b">
+              <th className="px-4 py-2 text-left">カテゴリ</th>
+              {months.map((m) => (
+                <th key={m.label} className="px-4 py-2 text-right">{m.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {Object.entries(categoryByMonth)
+              .sort(([, a], [, b]) => {
+                const totalA = Object.values(a).reduce((sum, v) => sum + v, 0);
+                const totalB = Object.values(b).reduce((sum, v) => sum + v, 0);
+                return totalB - totalA;
+              })
+              .map(([majorName, monthData]) => (
+                <tr key={majorName} className="border-b hover:bg-gray-50">
+                  <td className="px-4 py-2 font-medium">{majorName}</td>
+                  {months.map((m) => (
+                    <td key={m.label} className="px-4 py-2 text-right">
+                      ¥{(monthData[m.label] || 0).toLocaleString()}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Cost Type Chart (Stacked Bar representation) */}
       <div className="rounded-lg bg-white p-6 shadow">
-        <p className="text-gray-600">
-          月次比較機能は Phase 3 で実装予定です。
-        </p>
+        <h3 className="mb-4 text-lg font-semibold">固定費 vs 変動費</h3>
+        <div className="space-y-4">
+          {months.map((m) => {
+            const fixed = costTypeByMonth['固定']?.[m.label] || 0;
+            const variable = costTypeByMonth['変動']?.[m.label] || 0;
+            const total = fixed + variable;
+            const fixedPercent = total > 0 ? (fixed / total) * 100 : 0;
+            const variablePercent = total > 0 ? (variable / total) * 100 : 0;
+
+            return (
+              <div key={m.label}>
+                <div className="mb-1 flex justify-between text-sm">
+                  <span>{m.label}</span>
+                  <span>¥{total.toLocaleString()}</span>
+                </div>
+                <div className="flex h-8 w-full overflow-hidden rounded">
+                  <div
+                    className="flex items-center justify-center bg-blue-500 text-xs text-white"
+                    style={{ width: `${fixedPercent}%` }}
+                  >
+                    {fixedPercent > 10 && `固定 ¥${fixed.toLocaleString()}`}
+                  </div>
+                  <div
+                    className="flex items-center justify-center bg-green-500 text-xs text-white"
+                    style={{ width: `${variablePercent}%` }}
+                  >
+                    {variablePercent > 10 && `変動 ¥${variable.toLocaleString()}`}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-4 flex gap-4 text-sm">
+          <div className="flex items-center gap-1">
+            <div className="h-3 w-3 rounded bg-blue-500" />
+            <span>固定費</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="h-3 w-3 rounded bg-green-500" />
+            <span>変動費</span>
+          </div>
+        </div>
+      </div>
+
+      {/* User Shares Chart */}
+      <div className="rounded-lg bg-white p-6 shadow">
+        <h3 className="mb-4 text-lg font-semibold">ユーザー別負担推移</h3>
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b">
+              <th className="px-4 py-2 text-left">ユーザー</th>
+              {months.map((m) => (
+                <th key={m.label} className="px-4 py-2 text-right">{m.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {users.map((user) => (
+              <tr key={user.id} className="border-b hover:bg-gray-50">
+                <td className="px-4 py-2 font-medium">{user.aliases[0] || user.name}</td>
+                {months.map((m) => (
+                  <td key={m.label} className="px-4 py-2 text-right">
+                    ¥{(userSharesByMonth[user.id]?.[m.label] || 0).toLocaleString()}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

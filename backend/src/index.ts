@@ -4,6 +4,10 @@ import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { authMiddleware, type AuthUser } from './middleware/auth.js';
 import authRoutes from './routes/auth.js';
+import masterRoutes from './routes/master.js';
+import transactionRoutes from './routes/transactions.js';
+import memoRoutes from './routes/memos.js';
+import aiRoutes from './routes/ai.js';
 
 // Create app with type variables for context
 const app = new Hono<{
@@ -34,14 +38,11 @@ api.route('/auth', authRoutes);
 // Protected routes - require authentication
 api.use('/*', authMiddleware);
 
-// Placeholder routes (will be implemented in later phases)
-api.get('/transactions', (c) => {
-  return c.json({ message: 'Transactions endpoint - Phase 4' });
-});
-
-api.get('/tags', (c) => {
-  return c.json({ message: 'Tags endpoint - Phase 4' });
-});
+// Route handlers
+api.route('/master', masterRoutes);
+api.route('/transactions', transactionRoutes);
+api.route('/memos', memoRoutes);
+api.route('/ai', aiRoutes);
 
 // Export type for RPC client
 export type AppType = typeof app;
