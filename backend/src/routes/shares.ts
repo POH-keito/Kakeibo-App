@@ -25,19 +25,21 @@ app.use('/*', requireAdmin);
  */
 app.put('/override', async (c) => {
   const body = await c.req.json<{
-    transaction_id: number;
+    moneyforward_id: string;
     user_id: number;
-    amount: number;
+    value: number;
+    override_type?: 'PERCENT' | 'FIXED_AMOUNT';
   }>();
 
   const result = await ncb.upsert<TransactionShareOverride>(
     'transaction_share_overrides',
     {
-      transaction_id: body.transaction_id,
+      moneyforward_id: body.moneyforward_id,
       user_id: body.user_id,
-      amount: body.amount,
+      override_type: body.override_type || 'FIXED_AMOUNT',
+      value: body.value,
     },
-    ['transaction_id', 'user_id']
+    ['moneyforward_id', 'user_id']
   );
 
   return c.json(result[0] || null);
@@ -48,16 +50,16 @@ app.put('/override', async (c) => {
  * Delete a share override
  */
 app.delete('/override', async (c) => {
-  const transactionId = c.req.query('transaction_id');
+  const moneyforwardId = c.req.query('moneyforward_id');
   const userId = c.req.query('user_id');
 
-  if (!transactionId || !userId) {
+  if (!moneyforwardId || !userId) {
     return c.json({ error: 'Missing parameters' }, 400);
   }
 
   await ncb.delete('transaction_share_overrides', {
-    transaction_id: Number(transactionId),
-    user_id: Number(userId),
+    moneyforward_id: { _eq: moneyforwardId },
+    user_id: { _eq: Number(userId) },
   });
 
   return c.json({ success: true });
@@ -71,17 +73,17 @@ app.post('/apply-default', async (c) => {
   const body = await c.req.json<{
     year: string;
     month: string;
-    transaction_ids: number[];
+    moneyforward_ids: string[];
   }>();
 
-  const { year, month, transaction_ids } = body;
-  const targetMonth = `${year}-${month}`;
+  const { year, month, moneyforward_ids } = body;
+  const effectiveMonth = `${year}-${month}`;
 
   // Get burden ratio for the month
   const ratios = await ncb.list<BurdenRatio>('burden_ratios', {
     where: {
       household_id: HOUSEHOLD_ID,
-      target_month: targetMonth,
+      effective_month: effectiveMonth,
     },
   });
 
@@ -94,19 +96,19 @@ app.post('/apply-default', async (c) => {
   });
 
   // Get transactions to update
-  const transactions = await ncb.list<{ id: number; amount: number }>('transactions', {
-    where: { id: { _in: transaction_ids } },
+  const transactions = await ncb.list<{ moneyforward_id: string; amount: number }>('transactions', {
+    where: { moneyforward_id: { _in: moneyforward_ids } },
   });
 
   // Calculate and create/update shares
   const shares: Partial<TransactionShare>[] = [];
   for (const tx of transactions) {
     for (const detail of ratioDetails) {
-      const amount = Math.round(Math.abs(tx.amount) * (detail.percentage / 100));
+      const shareAmount = Math.round(Math.abs(tx.amount) * (detail.ratio_percent / 100));
       shares.push({
-        transaction_id: tx.id,
+        moneyforward_id: tx.moneyforward_id,
         user_id: detail.user_id,
-        amount,
+        share_amount: shareAmount,
       });
     }
   }
@@ -115,19 +117,19 @@ app.post('/apply-default', async (c) => {
   const batchSize = 100;
   for (let i = 0; i < shares.length; i += batchSize) {
     const batch = shares.slice(i, i + batchSize);
-    await ncb.upsert('transaction_shares', batch, ['transaction_id', 'user_id']);
+    await ncb.upsert('transaction_shares', batch, ['moneyforward_id', 'user_id']);
   }
 
   // Delete any existing overrides for these transactions
-  for (const txId of transaction_ids) {
+  for (const mfId of moneyforward_ids) {
     await ncb.delete('transaction_share_overrides', {
-      transaction_id: txId,
+      moneyforward_id: { _eq: mfId },
     });
   }
 
   return c.json({
     success: true,
-    updated: transaction_ids.length,
+    updated: moneyforward_ids.length,
   });
 });
 
@@ -138,19 +140,26 @@ app.post('/apply-default', async (c) => {
 app.post('/save-batch', async (c) => {
   const body = await c.req.json<{
     overrides: Array<{
-      transaction_id: number;
+      moneyforward_id: string;
       user_id: number;
-      amount: number;
+      value: number;
+      override_type?: 'PERCENT' | 'FIXED_AMOUNT';
     }>;
   }>();
 
   const { overrides } = body;
 
+  // Add default override_type
+  const normalizedOverrides = overrides.map((o) => ({
+    ...o,
+    override_type: o.override_type || 'FIXED_AMOUNT',
+  }));
+
   // Upsert overrides in batches
   const batchSize = 100;
-  for (let i = 0; i < overrides.length; i += batchSize) {
-    const batch = overrides.slice(i, i + batchSize);
-    await ncb.upsert('transaction_share_overrides', batch, ['transaction_id', 'user_id']);
+  for (let i = 0; i < normalizedOverrides.length; i += batchSize) {
+    const batch = normalizedOverrides.slice(i, i + batchSize);
+    await ncb.upsert('transaction_share_overrides', batch, ['moneyforward_id', 'user_id']);
   }
 
   return c.json({

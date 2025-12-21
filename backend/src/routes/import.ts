@@ -258,7 +258,7 @@ app.post('/execute', async (c) => {
     const shares: Partial<TransactionShare>[] = [];
     for (const [month, txs] of byMonth) {
       const ratios = await ncb.list<BurdenRatio>('burden_ratios', {
-        where: { household_id: HOUSEHOLD_ID, target_month: month },
+        where: { household_id: HOUSEHOLD_ID, effective_month: month },
       });
 
       if (ratios.length === 0) continue;
@@ -270,9 +270,9 @@ app.post('/execute', async (c) => {
       for (const tx of txs) {
         for (const detail of ratioDetails) {
           shares.push({
-            transaction_id: tx.id,
+            moneyforward_id: tx.moneyforward_id,
             user_id: detail.user_id,
-            amount: Math.round(Math.abs(tx.amount) * (detail.percentage / 100)),
+            share_amount: Math.round(Math.abs(tx.amount) * (detail.ratio_percent / 100)),
           });
         }
       }
@@ -281,7 +281,7 @@ app.post('/execute', async (c) => {
     // Create shares in batches
     for (let i = 0; i < shares.length; i += batchSize) {
       const batch = shares.slice(i, i + batchSize);
-      await ncb.upsert('transaction_shares', batch, ['transaction_id', 'user_id']);
+      await ncb.upsert('transaction_shares', batch, ['moneyforward_id', 'user_id']);
     }
   }
 

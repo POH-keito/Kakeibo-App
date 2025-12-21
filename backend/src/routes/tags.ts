@@ -127,7 +127,7 @@ app.get('/:id/transactions', async (c) => {
   return c.json({
     tag_id: id,
     transaction_count: transactionTags.length,
-    transaction_ids: transactionTags.map((tt) => tt.transaction_id),
+    moneyforward_ids: transactionTags.map((tt) => tt.moneyforward_id),
   });
 });
 
@@ -138,26 +138,26 @@ app.get('/:id/transactions', async (c) => {
 app.post('/assign', async (c) => {
   const body = await c.req.json<{
     tag_id: number;
-    transaction_ids: number[];
+    moneyforward_ids: string[];
   }>();
 
-  const { tag_id, transaction_ids } = body;
+  const { tag_id, moneyforward_ids } = body;
 
-  if (!tag_id || !transaction_ids || transaction_ids.length === 0) {
-    return c.json({ error: 'tag_id and transaction_ids are required' }, 400);
+  if (!tag_id || !moneyforward_ids || moneyforward_ids.length === 0) {
+    return c.json({ error: 'tag_id and moneyforward_ids are required' }, 400);
   }
 
   // Create transaction_tags entries
-  const entries = transaction_ids.map((tx_id) => ({
-    transaction_id: tx_id,
+  const entries = moneyforward_ids.map((mf_id) => ({
+    moneyforward_id: mf_id,
     tag_id,
   }));
 
-  await ncb.upsert('transaction_tags', entries, ['transaction_id', 'tag_id']);
+  await ncb.upsert('transaction_tags', entries, ['moneyforward_id', 'tag_id']);
 
   return c.json({
     success: true,
-    assigned: transaction_ids.length,
+    assigned: moneyforward_ids.length,
   });
 });
 
@@ -168,26 +168,26 @@ app.post('/assign', async (c) => {
 app.post('/unassign', async (c) => {
   const body = await c.req.json<{
     tag_id: number;
-    transaction_ids: number[];
+    moneyforward_ids: string[];
   }>();
 
-  const { tag_id, transaction_ids } = body;
+  const { tag_id, moneyforward_ids } = body;
 
-  if (!tag_id || !transaction_ids || transaction_ids.length === 0) {
-    return c.json({ error: 'tag_id and transaction_ids are required' }, 400);
+  if (!tag_id || !moneyforward_ids || moneyforward_ids.length === 0) {
+    return c.json({ error: 'tag_id and moneyforward_ids are required' }, 400);
   }
 
   // Delete transaction_tags entries
-  for (const tx_id of transaction_ids) {
+  for (const mf_id of moneyforward_ids) {
     await ncb.delete('transaction_tags', {
-      transaction_id: tx_id,
-      tag_id,
+      moneyforward_id: { _eq: mf_id },
+      tag_id: { _eq: tag_id },
     });
   }
 
   return c.json({
     success: true,
-    unassigned: transaction_ids.length,
+    unassigned: moneyforward_ids.length,
   });
 });
 

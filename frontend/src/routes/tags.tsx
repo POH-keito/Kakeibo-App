@@ -16,8 +16,8 @@ function TagsPage() {
   const { data: transactions = [], isLoading } = useTransactions(year, month, true);
   const { data: categories = [] } = useCategories();
 
-  const transactionIds = transactions.map((tx) => tx.id);
-  const { data: transactionTags = [] } = useTransactionTags(transactionIds);
+  const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id);
+  const { data: transactionTags = [] } = useTransactionTags(moneyforwardIds);
 
   // Group transactions by tag
   const tagSummary = useMemo(() => {
@@ -30,7 +30,7 @@ function TagsPage() {
 
     // Group transactions
     transactionTags.forEach((tt) => {
-      const transaction = transactions.find((tx) => tx.id === tt.transaction_id);
+      const transaction = transactions.find((tx) => tx.moneyforward_id === tt.moneyforward_id);
       if (transaction && summary[tt.tag_id]) {
         summary[tt.tag_id].transactions.push(transaction);
         summary[tt.tag_id].totalAmount += Math.abs(transaction.amount);

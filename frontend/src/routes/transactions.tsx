@@ -20,7 +20,7 @@ function TransactionsPage() {
   const [includeExcluded, setIncludeExcluded] = useState(true);
   const [sortMode, setSortMode] = useState<SortMode>('date-status');
   const [pendingChanges, setPendingChanges] = useState<
-    Map<number, { userId: number; percent: number }[]>
+    Map<string, { userId: number; percent: number }[]>
   >(new Map());
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
@@ -78,11 +78,11 @@ function TransactionsPage() {
 
   // Handle slider change
   const handleSliderChange = useCallback(
-    (transactionId: number, firstUserPercent: number) => {
+    (moneyforwardId: string, firstUserPercent: number) => {
       if (users.length < 2) return;
 
       const newChanges = new Map(pendingChanges);
-      newChanges.set(transactionId, [
+      newChanges.set(moneyforwardId, [
         { userId: users[0].id, percent: firstUserPercent },
         { userId: users[1].id, percent: 100 - firstUserPercent },
       ]);
@@ -93,9 +93,9 @@ function TransactionsPage() {
 
   // Reset to default
   const handleReset = useCallback(
-    (transactionId: number) => {
+    (moneyforwardId: string) => {
       const newChanges = new Map(pendingChanges);
-      newChanges.delete(transactionId);
+      newChanges.delete(moneyforwardId);
       setPendingChanges(newChanges);
     },
     [pendingChanges]
@@ -107,9 +107,9 @@ function TransactionsPage() {
 
     setSaveStatus('saving');
     try {
-      const householdTxIds = groupedTransactions
+      const householdMfIds = groupedTransactions
         .filter((tx) => tx.processing_status === '按分_家計')
-        .map((tx) => tx.id);
+        .map((tx) => tx.moneyforward_id);
 
       const res = await fetch('/api/shares/apply-default', {
         method: 'POST',
@@ -117,7 +117,7 @@ function TransactionsPage() {
         body: JSON.stringify({
           year,
           month,
-          transaction_ids: householdTxIds,
+          moneyforward_ids: householdMfIds,
         }),
       });
 
@@ -138,17 +138,17 @@ function TransactionsPage() {
 
     setSaveStatus('saving');
     try {
-      const overrides: Array<{ transaction_id: number; user_id: number; amount: number }> = [];
+      const overrides: Array<{ moneyforward_id: string; user_id: number; value: number }> = [];
 
-      pendingChanges.forEach((shares, transactionId) => {
-        const tx = transactions.find((t) => t.id === transactionId);
+      pendingChanges.forEach((shares, moneyforwardId) => {
+        const tx = transactions.find((t) => t.moneyforward_id === moneyforwardId);
         if (!tx) return;
 
         shares.forEach((share) => {
           overrides.push({
-            transaction_id: transactionId,
+            moneyforward_id: moneyforwardId,
             user_id: share.userId,
-            amount: Math.round(Math.abs(tx.amount) * (share.percent / 100)),
+            value: Math.round(Math.abs(tx.amount) * (share.percent / 100)),
           });
         });
       });
@@ -280,13 +280,13 @@ function TransactionsPage() {
         <div className="space-y-2">
           {groupedTransactions.map((tx) => (
             <TransactionRow
-              key={tx.id}
+              key={tx.moneyforward_id}
               transaction={tx}
               users={users}
               defaultRatio={defaultRatio}
-              pendingChange={pendingChanges.get(tx.id)}
-              onSliderChange={(percent) => handleSliderChange(tx.id, percent)}
-              onReset={() => handleReset(tx.id)}
+              pendingChange={pendingChanges.get(tx.moneyforward_id)}
+              onSliderChange={(percent) => handleSliderChange(tx.moneyforward_id, percent)}
+              onReset={() => handleReset(tx.moneyforward_id)}
             />
           ))}
         </div>
