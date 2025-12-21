@@ -49,13 +49,20 @@ app.get('/', async (c) => {
 
   // Filter out tagged transactions if requested
   if (!includeTagged) {
-    const transactionIds = transactions.map((tx) => tx.id);
-    if (transactionIds.length > 0) {
-      const transactionTags = await ncb.list<TransactionTag>('transaction_tags', {
-        where: { transaction_id: { _in: transactionIds } },
-      });
-      const taggedIds = new Set(transactionTags.map((tt) => tt.transaction_id));
-      transactions = transactions.filter((tx) => !taggedIds.has(tx.id));
+    const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id.trim());
+    if (moneyforwardIds.length > 0) {
+      // Batch the IDs to avoid URL length issues (NCB has ~2000 char limit)
+      const batchSize = 50;
+      const allTags: TransactionTag[] = [];
+      for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
+        const batch = moneyforwardIds.slice(i, i + batchSize);
+        const tags = await ncb.list<TransactionTag>('transaction_tags', {
+          where: { moneyforward_id: { _in: batch } },
+        });
+        allTags.push(...tags);
+      }
+      const taggedMfIds = new Set(allTags.map((tt) => tt.moneyforward_id.trim()));
+      transactions = transactions.filter((tx) => !taggedMfIds.has(tx.moneyforward_id.trim()));
     }
   }
 
@@ -64,7 +71,7 @@ app.get('/', async (c) => {
 
 /**
  * GET /api/transactions/shares
- * Get transaction shares for given transaction IDs
+ * Get transaction shares for given moneyforward IDs
  */
 app.get('/shares', async (c) => {
   const idsParam = c.req.query('ids');
@@ -72,19 +79,19 @@ app.get('/shares', async (c) => {
     return c.json([]);
   }
 
-  const ids = idsParam.split(',').map(Number).filter(Boolean);
-  if (ids.length === 0) {
+  const moneyforwardIds = idsParam.split(',').map((id) => id.trim()).filter(Boolean);
+  if (moneyforwardIds.length === 0) {
     return c.json([]);
   }
 
   // Batch IDs to avoid URL length issues
-  const batchSize = 100;
+  const batchSize = 50;
   const allShares: TransactionShare[] = [];
 
-  for (let i = 0; i < ids.length; i += batchSize) {
-    const batch = ids.slice(i, i + batchSize);
+  for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
+    const batch = moneyforwardIds.slice(i, i + batchSize);
     const shares = await ncb.list<TransactionShare>('transaction_shares', {
-      where: { transaction_id: { _in: batch } },
+      where: { moneyforward_id: { _in: batch } },
     });
     allShares.push(...shares);
   }
@@ -94,7 +101,7 @@ app.get('/shares', async (c) => {
 
 /**
  * GET /api/transactions/overrides
- * Get transaction share overrides for given transaction IDs
+ * Get transaction share overrides for given moneyforward IDs
  */
 app.get('/overrides', async (c) => {
   const idsParam = c.req.query('ids');
@@ -102,18 +109,18 @@ app.get('/overrides', async (c) => {
     return c.json([]);
   }
 
-  const ids = idsParam.split(',').map(Number).filter(Boolean);
-  if (ids.length === 0) {
+  const moneyforwardIds = idsParam.split(',').map((id) => id.trim()).filter(Boolean);
+  if (moneyforwardIds.length === 0) {
     return c.json([]);
   }
 
-  const batchSize = 100;
+  const batchSize = 50;
   const allOverrides: TransactionShareOverride[] = [];
 
-  for (let i = 0; i < ids.length; i += batchSize) {
-    const batch = ids.slice(i, i + batchSize);
+  for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
+    const batch = moneyforwardIds.slice(i, i + batchSize);
     const overrides = await ncb.list<TransactionShareOverride>('transaction_share_overrides', {
-      where: { transaction_id: { _in: batch } },
+      where: { moneyforward_id: { _in: batch } },
     });
     allOverrides.push(...overrides);
   }
@@ -123,7 +130,7 @@ app.get('/overrides', async (c) => {
 
 /**
  * GET /api/transactions/tags
- * Get transaction tags for given transaction IDs
+ * Get transaction tags for given moneyforward IDs
  */
 app.get('/tags', async (c) => {
   const idsParam = c.req.query('ids');
@@ -131,18 +138,18 @@ app.get('/tags', async (c) => {
     return c.json([]);
   }
 
-  const ids = idsParam.split(',').map(Number).filter(Boolean);
-  if (ids.length === 0) {
+  const moneyforwardIds = idsParam.split(',').map((id) => id.trim()).filter(Boolean);
+  if (moneyforwardIds.length === 0) {
     return c.json([]);
   }
 
-  const batchSize = 100;
+  const batchSize = 50;
   const allTags: TransactionTag[] = [];
 
-  for (let i = 0; i < ids.length; i += batchSize) {
-    const batch = ids.slice(i, i + batchSize);
+  for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
+    const batch = moneyforwardIds.slice(i, i + batchSize);
     const tags = await ncb.list<TransactionTag>('transaction_tags', {
-      where: { transaction_id: { _in: batch } },
+      where: { moneyforward_id: { _in: batch } },
     });
     allTags.push(...tags);
   }
@@ -157,12 +164,12 @@ app.get('/tags', async (c) => {
 app.get('/burden-ratio', async (c) => {
   const year = c.req.query('year') || new Date().getFullYear().toString();
   const month = c.req.query('month') || (new Date().getMonth() + 1).toString().padStart(2, '0');
-  const targetMonth = `${year}-${month}`;
+  const effectiveMonth = `${year}-${month}`;
 
   const ratios = await ncb.list<BurdenRatio>('burden_ratios', {
     where: {
       household_id: HOUSEHOLD_ID,
-      target_month: targetMonth,
+      effective_month: effectiveMonth,
     },
   });
 
@@ -209,12 +216,19 @@ app.get('/summary', async (c) => {
 
   // Filter tagged if needed
   if (!includeTagged && transactions.length > 0) {
-    const transactionIds = transactions.map((tx) => tx.id);
-    const transactionTags = await ncb.list<TransactionTag>('transaction_tags', {
-      where: { transaction_id: { _in: transactionIds } },
-    });
-    const taggedIds = new Set(transactionTags.map((tt) => tt.transaction_id));
-    transactions = transactions.filter((tx) => !taggedIds.has(tx.id));
+    const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id.trim());
+    // Batch the IDs to avoid URL length issues
+    const batchSize = 50;
+    const allTags: TransactionTag[] = [];
+    for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
+      const batch = moneyforwardIds.slice(i, i + batchSize);
+      const tags = await ncb.list<TransactionTag>('transaction_tags', {
+        where: { moneyforward_id: { _in: batch } },
+      });
+      allTags.push(...tags);
+    }
+    const taggedMfIds = new Set(allTags.map((tt) => tt.moneyforward_id.trim()));
+    transactions = transactions.filter((tx) => !taggedMfIds.has(tx.moneyforward_id.trim()));
   }
 
   // Filter only household expenses (按分_家計)
@@ -226,29 +240,40 @@ app.get('/summary', async (c) => {
   const totalSpending = householdTransactions.reduce((sum, tx) => sum + Math.abs(tx.amount), 0);
 
   // Get shares for user breakdown
-  const transactionIds = householdTransactions.map((tx) => tx.id);
+  const moneyforwardIds = householdTransactions.map((tx) => tx.moneyforward_id.trim());
   let userShares: Record<number, number> = {};
 
-  if (transactionIds.length > 0) {
-    const shares = await ncb.list<TransactionShare>('transaction_shares', {
-      where: { transaction_id: { _in: transactionIds } },
-    });
+  if (moneyforwardIds.length > 0) {
+    // Batch the IDs to avoid URL length issues
+    const batchSize = 50;
+    const shares: TransactionShare[] = [];
+    const overrides: TransactionShareOverride[] = [];
 
-    const overrides = await ncb.list<TransactionShareOverride>('transaction_share_overrides', {
-      where: { transaction_id: { _in: transactionIds } },
-    });
+    for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
+      const batch = moneyforwardIds.slice(i, i + batchSize);
+      const [batchShares, batchOverrides] = await Promise.all([
+        ncb.list<TransactionShare>('transaction_shares', {
+          where: { moneyforward_id: { _in: batch } },
+        }),
+        ncb.list<TransactionShareOverride>('transaction_share_overrides', {
+          where: { moneyforward_id: { _in: batch } },
+        }),
+      ]);
+      shares.push(...batchShares);
+      overrides.push(...batchOverrides);
+    }
 
-    // Create override lookup
+    // Create override lookup (prefer overrides over shares)
     const overrideMap = new Map<string, number>();
     overrides.forEach((o) => {
-      overrideMap.set(`${o.transaction_id}-${o.user_id}`, o.amount);
+      // For percentage overrides, we'd need to calculate the actual amount
+      // For now, store the value as-is (will be handled below)
+      overrideMap.set(`${o.moneyforward_id.trim()}-${o.user_id}`, o.value);
     });
 
-    // Calculate user totals (prefer overrides)
+    // Calculate user totals (prefer shares as they contain calculated amounts)
     shares.forEach((share) => {
-      const key = `${share.transaction_id}-${share.user_id}`;
-      const amount = overrideMap.has(key) ? overrideMap.get(key)! : share.amount;
-      userShares[share.user_id] = (userShares[share.user_id] || 0) + amount;
+      userShares[share.user_id] = (userShares[share.user_id] || 0) + share.share_amount;
     });
   }
 

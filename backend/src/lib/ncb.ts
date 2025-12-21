@@ -3,8 +3,12 @@
  * REST API wrapper for NCB database operations
  */
 
-const NCB_API_URL = process.env.NCB_API_URL || 'https://app.nocodebackend.com';
-const NCB_API_KEY = process.env.NCB_API_KEY || '';
+// Environment variables are accessed lazily to ensure dotenv has loaded
+const getConfig = () => ({
+  baseUrl: process.env.NCB_BASE_URL || 'https://ncb.fukushi.ma',
+  instance: process.env.NCB_INSTANCE || '',
+  apiKey: process.env.NCB_API_KEY || '',
+});
 
 interface NCBQueryOptions {
   where?: Record<string, unknown>;
@@ -14,41 +18,87 @@ interface NCBQueryOptions {
 }
 
 interface NCBResponse<T> {
-  data: T[];
-  count?: number;
+  data: T;
+  status?: string;
+  message?: string;
 }
 
-class NCBClient {
-  private baseUrl: string;
-  private apiKey: string;
+// Convert Hasura-style where clause to NCB query params
+const convertWhereToParams = (where: Record<string, unknown>, params: URLSearchParams): void => {
+  const processCondition = (field: string, condition: unknown) => {
+    if (typeof condition !== 'object' || condition === null) {
+      params.append(`${field}[eq]`, String(condition));
+      return;
+    }
 
-  constructor(baseUrl: string, apiKey: string) {
-    this.baseUrl = baseUrl;
-    this.apiKey = apiKey;
+    for (const [op, value] of Object.entries(condition as Record<string, unknown>)) {
+      switch (op) {
+        case '_eq':
+          params.append(`${field}[eq]`, String(value));
+          break;
+        case '_neq':
+          params.append(`${field}[neq]`, String(value));
+          break;
+        case '_gt':
+          params.append(`${field}[gt]`, String(value));
+          break;
+        case '_gte':
+          params.append(`${field}[gte]`, String(value));
+          break;
+        case '_lt':
+          params.append(`${field}[lt]`, String(value));
+          break;
+        case '_lte':
+          params.append(`${field}[lte]`, String(value));
+          break;
+        case '_in':
+          if (Array.isArray(value)) {
+            params.append(`${field}[in]`, value.join(','));
+          }
+          break;
+        case '_like':
+          params.append(`${field}[like]`, String(value));
+          break;
+      }
+    }
+  };
+
+  for (const [key, value] of Object.entries(where)) {
+    if (key === '_and' && Array.isArray(value)) {
+      for (const condition of value) {
+        convertWhereToParams(condition as Record<string, unknown>, params);
+      }
+    } else if (key === '_or') {
+      // NCB doesn't support OR directly, skip for now
+      console.warn('NCB API does not support _or conditions');
+    } else {
+      processCondition(key, value);
+    }
+  }
+};
+
+class NCBClient {
+  private get baseUrl() {
+    return getConfig().baseUrl;
+  }
+
+  private get instance() {
+    return getConfig().instance;
+  }
+
+  private get apiKey() {
+    return getConfig().apiKey;
   }
 
   private async request<T>(
     method: string,
-    table: string,
-    options?: NCBQueryOptions & { body?: unknown }
+    endpoint: string,
+    options?: { body?: unknown }
   ): Promise<T> {
-    const url = new URL(`/api/tables/${table}/rows`, this.baseUrl);
+    const url = `${this.baseUrl}${endpoint}`;
+    console.log('[NCB API Request]', method, url);
 
-    // Add query parameters
-    if (options?.where) {
-      url.searchParams.set('where', JSON.stringify(options.where));
-    }
-    if (options?.order_by) {
-      url.searchParams.set('order_by', JSON.stringify(options.order_by));
-    }
-    if (options?.limit) {
-      url.searchParams.set('limit', String(options.limit));
-    }
-    if (options?.offset) {
-      url.searchParams.set('offset', String(options.offset));
-    }
-
-    const res = await fetch(url.toString(), {
+    const res = await fetch(url, {
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -57,23 +107,75 @@ class NCBClient {
       body: options?.body ? JSON.stringify(options.body) : undefined,
     });
 
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(`NCB API Error: ${res.status} ${error}`);
+    const text = await res.text();
+    let result: NCBResponse<T>;
+    try {
+      result = JSON.parse(text) as NCBResponse<T>;
+    } catch {
+      console.error('[NCB API Error] Failed to parse response:', text.substring(0, 200));
+      throw new Error(`NCB API Error: ${res.status} - Invalid JSON response`);
     }
 
-    return res.json() as Promise<T>;
+    if (!res.ok || result.status === 'error') {
+      console.error('[NCB API Error]', url, result.message || result);
+      const errorMessage = result.message || `NCB API Error: ${res.status}`;
+      throw new Error(errorMessage);
+    }
+
+    return result.data;
   }
 
   async list<T>(table: string, options?: NCBQueryOptions): Promise<T[]> {
-    const response = await this.request<NCBResponse<T>>('GET', table, options);
-    return response.data || [];
+    const params = new URLSearchParams();
+    params.append('Instance', this.instance);
+
+    if (options?.limit) {
+      params.append('limit', String(options.limit));
+    }
+
+    if (options?.offset) {
+      const page = Math.floor(options.offset / (options.limit || 100)) + 1;
+      params.append('page', String(page));
+    }
+
+    if (options?.order_by) {
+      const sortFields: string[] = [];
+      const orderDirs: string[] = [];
+      const orderBy = Array.isArray(options.order_by) ? options.order_by : [options.order_by];
+      for (const item of orderBy) {
+        for (const [field, direction] of Object.entries(item)) {
+          sortFields.push(field);
+          orderDirs.push(direction);
+        }
+      }
+      if (sortFields.length > 0) {
+        params.append('sort', sortFields.join(','));
+        params.append('order', orderDirs.join(','));
+      }
+    }
+
+    if (options?.where) {
+      convertWhereToParams(options.where, params);
+    }
+
+    const data = await this.request<T[]>('GET', `/read/${table}?${params.toString()}`);
+    return data || [];
   }
 
   async create<T>(table: string, data: Partial<T> | Partial<T>[]): Promise<T[]> {
     const items = Array.isArray(data) ? data : [data];
-    const response = await this.request<NCBResponse<T>>('POST', table, { body: items });
-    return response.data || [];
+    const results: T[] = [];
+
+    for (const item of items) {
+      const result = await this.request<T>(
+        'POST',
+        `/create/${table}?Instance=${this.instance}`,
+        { body: item }
+      );
+      results.push(result);
+    }
+
+    return results;
   }
 
   async update<T>(
@@ -81,42 +183,62 @@ class NCBClient {
     where: Record<string, unknown>,
     data: Partial<T>
   ): Promise<T[]> {
-    const url = new URL(`/api/tables/${table}/rows`, this.baseUrl);
-    url.searchParams.set('where', JSON.stringify(where));
+    // NCB requires ID for update - extract from where clause
+    let id: number | null = null;
 
-    const res = await fetch(url.toString(), {
-      method: 'PATCH',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(data),
-    });
-
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(`NCB API Error: ${res.status} ${error}`);
+    const whereId = where.id as Record<string, unknown> | number | undefined;
+    if (typeof whereId === 'object' && whereId?._eq) {
+      id = whereId._eq as number;
+    } else if (typeof whereId === 'number') {
+      id = whereId;
     }
 
-    const response = await res.json() as NCBResponse<T>;
-    return response.data || [];
+    if (id === null) {
+      // Fetch records first to get IDs
+      const records = await this.list<{ id: number }>(table, { where, limit: 1000 });
+      const results: T[] = [];
+
+      for (const record of records) {
+        const result = await this.request<T>(
+          'PATCH',
+          `/update/${table}/${record.id}?Instance=${this.instance}`,
+          { body: data }
+        );
+        results.push(result);
+      }
+
+      return results;
+    }
+
+    const result = await this.request<T>(
+      'PATCH',
+      `/update/${table}/${id}?Instance=${this.instance}`,
+      { body: data }
+    );
+
+    return [result];
   }
 
-  async delete(table: string, where: Record<string, unknown>): Promise<void> {
-    const url = new URL(`/api/tables/${table}/rows`, this.baseUrl);
-    url.searchParams.set('where', JSON.stringify(where));
+  async delete(table: string, where: Record<string, unknown>): Promise<number> {
+    // NCB requires ID for delete - extract from where clause
+    let ids: number[] = [];
 
-    const res = await fetch(url.toString(), {
-      method: 'DELETE',
-      headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-    });
-
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(`NCB API Error: ${res.status} ${error}`);
+    const whereId = where.id as Record<string, unknown> | undefined;
+    if (whereId?._eq) {
+      ids = [whereId._eq as number];
+    } else if (whereId?._in) {
+      ids = whereId._in as number[];
+    } else {
+      // Fetch records first to get IDs
+      const records = await this.list<{ id: number }>(table, { where, limit: 5000 });
+      ids = records.map(r => r.id);
     }
+
+    for (const id of ids) {
+      await this.request<unknown>('DELETE', `/delete/${table}/${id}?Instance=${this.instance}`);
+    }
+
+    return ids.length;
   }
 
   async upsert<T>(
@@ -125,30 +247,46 @@ class NCBClient {
     conflictColumns: string[]
   ): Promise<T[]> {
     const items = Array.isArray(data) ? data : [data];
-    const url = new URL(`/api/tables/${table}/rows`, this.baseUrl);
-    url.searchParams.set('on_conflict', conflictColumns.join(','));
+    const results: T[] = [];
 
-    const res = await fetch(url.toString(), {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(items),
-    });
+    for (const item of items) {
+      // Build where clause from conflict columns
+      const where: Record<string, unknown> = {};
+      for (const col of conflictColumns) {
+        const value = (item as Record<string, unknown>)[col];
+        if (value !== undefined) {
+          where[col] = { _eq: value };
+        }
+      }
 
-    if (!res.ok) {
-      const error = await res.text();
-      throw new Error(`NCB API Error: ${res.status} ${error}`);
+      // Check if record exists
+      const existing = await this.list<{ id: number }>(table, { where, limit: 1 });
+
+      if (existing.length > 0) {
+        // Update existing record
+        const result = await this.request<T>(
+          'PATCH',
+          `/update/${table}/${existing[0].id}?Instance=${this.instance}`,
+          { body: item }
+        );
+        results.push(result);
+      } else {
+        // Create new record
+        const result = await this.request<T>(
+          'POST',
+          `/create/${table}?Instance=${this.instance}`,
+          { body: item }
+        );
+        results.push(result);
+      }
     }
 
-    const response = await res.json() as NCBResponse<T>;
-    return response.data || [];
+    return results;
   }
 }
 
 // Singleton instance
-export const ncb = new NCBClient(NCB_API_URL, NCB_API_KEY);
+export const ncb = new NCBClient();
 
 // Type definitions for database tables
 export interface Transaction {
@@ -187,29 +325,30 @@ export interface UserAlias {
 
 export interface TransactionShare {
   id: number;
-  transaction_id: number;
+  moneyforward_id: string;
   user_id: number;
-  amount: number;
+  share_amount: number;
 }
 
 export interface TransactionShareOverride {
   id: number;
-  transaction_id: number;
+  moneyforward_id: string;
   user_id: number;
-  amount: number;
+  override_type: 'PERCENT' | 'FIXED_AMOUNT';
+  value: number;
 }
 
 export interface BurdenRatio {
   id: number;
   household_id: number;
-  target_month: string;
+  effective_month: string;
 }
 
 export interface BurdenRatioDetail {
   id: number;
   burden_ratio_id: number;
   user_id: number;
-  percentage: number;
+  ratio_percent: number;
 }
 
 export interface Tag {
@@ -221,7 +360,7 @@ export interface Tag {
 
 export interface TransactionTag {
   id: number;
-  transaction_id: number;
+  moneyforward_id: string;
   tag_id: number;
 }
 

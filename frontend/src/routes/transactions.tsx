@@ -73,7 +73,7 @@ function TransactionsPage() {
     if (!burdenRatio?.details || users.length === 0) return null;
     const firstUser = users[0];
     const firstDetail = burdenRatio.details.find((d) => d.user_id === firstUser.id);
-    return firstDetail?.percentage || 50;
+    return firstDetail?.ratio_percent || 50;
   }, [burdenRatio, users]);
 
   // Handle slider change
@@ -177,7 +177,7 @@ function TransactionsPage() {
     return burdenRatio.details
       .map((d) => {
         const user = users.find((u) => u.id === d.user_id);
-        return `${user?.aliases[0] || user?.name}: ${d.percentage}%`;
+        return `${user?.aliases[0] || user?.name}: ${d.ratio_percent}%`;
       })
       .join(' / ');
   }, [burdenRatio, users]);
