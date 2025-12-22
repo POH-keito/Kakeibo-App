@@ -29,7 +29,7 @@ export async function errorHandler(c: Context, next: Next) {
         method: c.req.method,
       });
 
-      return c.json(response, err.statusCode);
+      return c.json(response, err.statusCode as 400 | 401 | 403 | 404 | 500);
     }
 
     // Handle unknown errors

@@ -12,7 +12,6 @@ const queryClient = new QueryClient({
       staleTime: 1000 * 60 * 5, // 5 minutes (default for transaction data)
       retry: 1, // Only retry once on failure
       refetchOnWindowFocus: false, // Disable refetch on window focus for stability
-      refetchOnError: false, // Disable refetch on error
     },
   },
 });

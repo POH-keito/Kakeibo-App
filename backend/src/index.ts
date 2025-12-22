@@ -17,6 +17,7 @@ import aiRoutes from './routes/ai.js';
 import sharesRoutes from './routes/shares.js';
 import importRoutes from './routes/import.js';
 import tagsRoutes from './routes/tags.js';
+import burdenRatiosRoutes from './routes/burden-ratios.js';
 
 // Create app with type variables for context
 const app = new Hono<{
@@ -56,6 +57,7 @@ api.route('/ai', aiRoutes);
 api.route('/shares', sharesRoutes);
 api.route('/import', importRoutes);
 api.route('/tags', tagsRoutes);
+api.route('/burden-ratios', burdenRatiosRoutes);
 
 // Export type for RPC client
 export type AppType = typeof app;

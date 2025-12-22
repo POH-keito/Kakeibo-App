@@ -314,6 +314,72 @@ export function useTagTransactionCount(tagId: number | null) {
   });
 }
 
+// Burden ratio hooks
+export function useBurdenRatios() {
+  return useQuery({
+    queryKey: ['burden-ratios'],
+    queryFn: () => fetchApi<BurdenRatio[]>('/burden-ratios'),
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
+  });
+}
+
+export function useCreateBurdenRatio() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      effectiveMonth,
+      details,
+    }: {
+      effectiveMonth: string;
+      details: Array<{ user_id: number; ratio_percent: number }>;
+    }) =>
+      fetchApi<BurdenRatio>('/burden-ratios', {
+        method: 'POST',
+        body: JSON.stringify({ effective_month: effectiveMonth, details }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['burden-ratios'] });
+    },
+  });
+}
+
+export function useUpdateBurdenRatio() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      id,
+      details,
+    }: {
+      id: number;
+      details: Array<{ user_id: number; ratio_percent: number }>;
+    }) =>
+      fetchApi<BurdenRatio>(`/burden-ratios/${id}`, {
+        method: 'PUT',
+        body: JSON.stringify({ details }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['burden-ratios'] });
+    },
+  });
+}
+
+export function useDeleteBurdenRatio() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: number) =>
+      fetchApi<{ success: boolean }>(`/burden-ratios/${id}`, {
+        method: 'DELETE',
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['burden-ratios'] });
+    },
+  });
+}
+
 // AI analysis hooks
 export function useAIAnalysis() {
   return useMutation({
