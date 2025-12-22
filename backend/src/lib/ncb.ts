@@ -337,6 +337,11 @@ export interface Transaction {
   moneyforward_id: string;
   processing_status: string;
   memo: string | null;
+  financial_institution: string | null;
+  is_calculation_target: boolean;
+  is_transfer: boolean;
+  applied_burden_ratio_id: number | null;
+  applied_exclusion_rule_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -408,4 +413,10 @@ export interface MonthlyMemo {
   household_id: number;
   target_month: string;
   memo_content: string;
+}
+
+export interface ExclusionRule {
+  id: number;
+  household_id: number;
+  category_id: number;
 }
