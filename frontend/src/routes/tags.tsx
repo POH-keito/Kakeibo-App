@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useMemo } from 'react';
-import { useTags, useTransactions, useTransactionTags, useCategories, useBulkAssignTags } from '../lib/api';
+import { useTags, useTransactions, useTransactionTags, useCategories } from '../lib/api';
 import { CalendarView, DayTransactionModal } from '../components/CalendarView';
 import type { Transaction } from '../lib/types';
 
@@ -26,8 +26,6 @@ function TagsPage() {
 
   const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id);
   const { data: transactionTags = [] } = useTransactionTags(moneyforwardIds);
-
-  const assignTags = useBulkAssignTags();
 
   // Group transactions by tag
   const tagSummary = useMemo(() => {
@@ -88,9 +86,11 @@ function TagsPage() {
 
       // Execute additions
       for (const tagId of toAdd) {
-        await assignTags.mutateAsync({
-          tag_id: tagId,
-          moneyforward_ids: [moneyforward_id],
+        // TODO: Implement bulk tag assignment API
+        await fetch(`/api/tags/assign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tag_id: tagId, moneyforward_ids: [moneyforward_id] }),
         });
       }
 
