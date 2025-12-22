@@ -1,31 +1,39 @@
-# 1. Frontend build stage
-FROM node:20-alpine AS frontend-builder
-WORKDIR /app/frontend
-COPY frontend/package*.json ./
-RUN npm ci
-COPY frontend/ ./
-RUN npm run build
+# 1. Build stage (both frontend and backend)
+FROM node:20-alpine AS builder
+WORKDIR /app
 
-# 2. Backend build stage
-FROM node:20-alpine AS backend-builder
-WORKDIR /app/backend
-COPY backend/package*.json ./
-RUN npm ci
-COPY backend/ ./
-RUN npm run build
+# Copy package files
+COPY package*.json ./
+COPY frontend/package*.json ./frontend/
+COPY backend/package*.json ./backend/
 
-# 3. Production stage
+# Install all dependencies (including devDependencies for build)
+RUN npm ci
+
+# Copy source code
+COPY frontend/ ./frontend/
+COPY backend/ ./backend/
+
+# Build both packages
+RUN npm run build -w backend
+RUN npm run build -w frontend
+
+# 2. Production stage
 FROM node:20-alpine
 WORKDIR /app
 
-# Copy backend dist and production dependencies
-COPY backend/package*.json ./
-RUN npm ci --omit=dev
+# Copy package files for production install
+COPY package*.json ./
+COPY backend/package*.json ./backend/
 
-COPY --from=backend-builder /app/backend/dist ./dist
+# Install production dependencies only
+RUN npm ci --omit=dev -w backend
+
+# Copy backend dist
+COPY --from=builder /app/backend/dist ./dist
 
 # Copy frontend build to public directory
-COPY --from=frontend-builder /app/frontend/dist ./public
+COPY --from=builder /app/frontend/dist ./public
 
 # Cloud Run uses PORT env var (default 8080)
 ENV PORT=8080
