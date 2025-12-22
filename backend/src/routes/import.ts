@@ -6,6 +6,9 @@ import {
   type TransactionShare,
   type BurdenRatio,
   type BurdenRatioDetail,
+  type User,
+  type UserAlias,
+  type ExclusionRule,
 } from '../lib/ncb.js';
 import { requireAdmin, type AuthUser } from '../middleware/auth.js';
 
@@ -26,7 +29,12 @@ interface ParsedTransaction {
   major_name: string;
   minor_name: string;
   memo: string | null;
-  is_excluded: boolean; // 計算対象が「○」以外
+  financial_institution: string;
+  is_calculation_target: boolean;
+  is_transfer: boolean;
+  processing_status: string;
+  applied_burden_ratio_id: number | null;
+  applied_exclusion_rule_id: number | null;
 }
 
 interface ImportResult {
@@ -51,6 +59,26 @@ app.post('/parse', async (c) => {
     return c.json({ error: 'Invalid CSV format' }, 400);
   }
 
+  // Get household context
+  const user = c.get('user');
+  const householdId = user.householdId;
+
+  // Fetch master data for processing status logic
+  const [users, userAliases, categories, exclusionRules, burdenRatios] = await Promise.all([
+    ncb.list<User>('users', { where: { household_id: householdId } }),
+    ncb.list<UserAlias>('user_aliases', {}),
+    ncb.list<Category>('categories', { where: { household_id: householdId } }),
+    ncb.list<ExclusionRule>('exclusion_rules', { where: { household_id: householdId } }),
+    ncb.list<BurdenRatio>('burden_ratios', { where: { household_id: householdId } }),
+  ]);
+
+  // Build lookup maps
+  const categoryMap = new Map(
+    categories.map((c) => [`${c.major_name}|${c.minor_name}`, c])
+  );
+  const exclusionCategoryIds = new Set(exclusionRules.map((r) => r.category_id));
+  const aliases = userAliases.filter((ua) => users.some((u) => u.id === ua.user_id));
+
   // Skip header
   const transactions: ParsedTransaction[] = [];
   const seenIds = new Set<string>();
@@ -64,11 +92,11 @@ app.post('/parse', async (c) => {
       date, // 日付
       content, // 内容
       amountStr, // 金額（円）
-      _institution, // 保有金融機関
+      institution, // 保有金融機関
       majorName, // 大項目
       minorName, // 中項目
       memo, // メモ
-      _transfer, // 振替
+      transfer, // 振替
       id, // ID
     ] = cols;
 
@@ -76,7 +104,8 @@ app.post('/parse', async (c) => {
     if (seenIds.has(id)) continue;
     seenIds.add(id);
 
-    const isExcluded = calcTarget !== '○';
+    const isCalculationTarget = calcTarget === '○';
+    const isTransfer = transfer === '1' || transfer === 'true' || transfer === '○';
     const amount = parseInt(amountStr.replace(/,/g, ''), 10) || 0;
 
     // Parse date (YYYY/MM/DD -> YYYY-MM-DD)
@@ -86,15 +115,66 @@ app.post('/parse', async (c) => {
         ? `${dateParts[0]}-${dateParts[1].padStart(2, '0')}-${dateParts[2].padStart(2, '0')}`
         : date;
 
+    // Determine processing_status (matches old app logic exactly)
+    let processingStatus = '按分_家計';
+    let appliedBurdenRatioId: number | null = null;
+    let appliedExclusionRuleId: number | null = null;
+
+    if (isTransfer) {
+      processingStatus = '集計除外_振替';
+    } else if (!isCalculationTarget) {
+      processingStatus = '集計除外_計算対象外';
+    } else {
+      const memoText = memo || '';
+      let found = false;
+
+      // Check user aliases
+      for (const userAlias of aliases) {
+        if (memoText.startsWith(userAlias.alias)) {
+          processingStatus = `按分_${userAlias.alias}`;
+          found = true;
+          break;
+        }
+      }
+
+      // Check for 家計
+      if (!found && memoText.startsWith('家計')) {
+        processingStatus = '按分_家計';
+        found = true;
+      }
+
+      // Check exclusion rules
+      if (!found) {
+        const category = categoryMap.get(`${majorName}|${minorName}`);
+        if (category && exclusionCategoryIds.has(category.id)) {
+          processingStatus = '集計除外_項目';
+          const rule = exclusionRules.find((r) => r.category_id === category.id);
+          appliedExclusionRuleId = rule?.id || null;
+        }
+      }
+
+      // For 按分_家計, find burden ratio for transaction month
+      if (processingStatus === '按分_家計') {
+        const yearMonth = isoDate.substring(0, 7); // YYYY-MM
+        const burdenRatio = burdenRatios.find((br) => br.effective_month === yearMonth);
+        appliedBurdenRatioId = burdenRatio?.id || null;
+      }
+    }
+
     transactions.push({
       moneyforward_id: id,
       transaction_date: isoDate,
-      content,
+      content: (content && content.trim()) ? content : '（内容なし）',
       amount,
       major_name: majorName,
       minor_name: minorName,
       memo: memo || null,
-      is_excluded: isExcluded,
+      financial_institution: (institution && institution.trim()) ? institution : '（金融機関なし）',
+      is_calculation_target: isCalculationTarget,
+      is_transfer: isTransfer,
+      processing_status: processingStatus,
+      applied_burden_ratio_id: appliedBurdenRatioId,
+      applied_exclusion_rule_id: appliedExclusionRuleId,
     });
   }
 
@@ -105,14 +185,7 @@ app.post('/parse', async (c) => {
   });
   const existingSet = new Set(existing.map((t) => t.moneyforward_id));
 
-  // Get household_id from context
-  const user = c.get('user');
-  const householdId = user.householdId;
-
-  // Check for existing categories
-  const categories = await ncb.list<Category>('categories', {
-    where: { household_id: householdId },
-  });
+  // categorySet for checking new categories
   const categorySet = new Set(categories.map((c) => `${c.major_name}|${c.minor_name}`));
 
   // Find new categories
@@ -197,18 +270,11 @@ app.post('/execute', async (c) => {
   });
   const existingMap = new Map(existing.map((t) => [t.moneyforward_id, t]));
 
-  // Prepare transactions for upsert
+  // Prepare transactions for upsert (with all fields from old app)
   const toUpsert: Partial<Transaction>[] = [];
 
   for (const tx of transactions) {
     const category = categoryMap.get(`${tx.major_name}|${tx.minor_name}`);
-
-    // Determine processing status
-    let processingStatus = '按分_家計';
-    if (tx.is_excluded) {
-      processingStatus = '集計除外_計算対象外';
-    }
-    // TODO: Add more rules for individual attribution
 
     toUpsert.push({
       household_id: householdId,
@@ -216,9 +282,14 @@ app.post('/execute', async (c) => {
       transaction_date: tx.transaction_date,
       content: tx.content,
       amount: tx.amount,
+      financial_institution: tx.financial_institution,
+      is_calculation_target: tx.is_calculation_target,
+      is_transfer: tx.is_transfer,
       category_id: category?.id || null,
-      processing_status: processingStatus,
       memo: tx.memo,
+      processing_status: tx.processing_status,
+      applied_burden_ratio_id: tx.applied_burden_ratio_id,
+      applied_exclusion_rule_id: tx.applied_exclusion_rule_id,
     });
   }
 
@@ -241,46 +312,88 @@ app.post('/execute', async (c) => {
     }
   }
 
-  // Calculate shares for new transactions
-  const newTxIds = transactions
-    .filter((tx) => !existingMap.has(tx.moneyforward_id) && !tx.is_excluded)
-    .map((tx) => tx.moneyforward_id);
+  // Calculate shares for all transactions (matching old app logic)
+  const txsNeedingShares = transactions.filter(
+    (tx) => tx.processing_status.startsWith('按分_')
+  );
 
-  if (newTxIds.length > 0) {
-    // Get the transactions we just created
-    const newTransactions = await ncb.list<Transaction>('transactions', {
-      where: { moneyforward_id: { _in: newTxIds } },
+  if (txsNeedingShares.length > 0) {
+    // Get users and user aliases
+    const [users, userAliases, burdenRatios] = await Promise.all([
+      ncb.list<User>('users', { where: { household_id: householdId } }),
+      ncb.list<UserAlias>('user_aliases', {}),
+      ncb.list<BurdenRatio>('burden_ratios', { where: { household_id: householdId } }),
+    ]);
+
+    const userAliasMap = new Map(userAliases.map((ua) => [ua.alias, ua.user_id]));
+
+    // Get burden ratio details for all burden ratios
+    const burdenRatioIds = burdenRatios.map((br) => br.id);
+    const burdenRatioDetails = await ncb.list<BurdenRatioDetail>('burden_ratio_details', {
+      where: { burden_ratio_id: { _in: burdenRatioIds } },
     });
 
-    // Group by month and calculate shares
-    const byMonth = new Map<string, Transaction[]>();
-    for (const tx of newTransactions) {
-      const month = tx.transaction_date.substring(0, 7); // YYYY-MM
-      if (!byMonth.has(month)) {
-        byMonth.set(month, []);
-      }
-      byMonth.get(month)!.push(tx);
-    }
-
-    // Get burden ratios for each month
     const shares: Partial<TransactionShare>[] = [];
-    for (const [month, txs] of byMonth) {
-      const ratios = await ncb.list<BurdenRatio>('burden_ratios', {
-        where: { household_id: householdId, effective_month: month },
-      });
 
-      if (ratios.length === 0) continue;
+    for (const tx of txsNeedingShares) {
+      // Extract alias from processing_status if applicable
+      const match = tx.processing_status.match(/^按分_(.+)$/);
+      if (!match) continue;
 
-      const ratioDetails = await ncb.list<BurdenRatioDetail>('burden_ratio_details', {
-        where: { burden_ratio_id: ratios[0].id },
-      });
+      const target = match[1];
+      const amount = tx.amount;
 
-      for (const tx of txs) {
-        for (const detail of ratioDetails) {
+      if (target === '家計') {
+        // Use burden_ratios for the transaction month
+        const yearMonth = tx.transaction_date.substring(0, 7); // YYYY-MM
+        const burdenRatio = burdenRatios.find((br) => br.effective_month === yearMonth);
+
+        if (burdenRatio && users.length === 2) {
+          const details = burdenRatioDetails.filter((d) => d.burden_ratio_id === burdenRatio.id);
+          const user1 = users[0];
+          const user2 = users[1];
+          const user1Detail = details.find((d) => d.user_id === user1.id);
+
+          const user1Percent = user1Detail ? user1Detail.ratio_percent : 50;
+          const user1Share = Math.round(amount * (user1Percent / 100));
+
           shares.push({
             moneyforward_id: tx.moneyforward_id,
-            user_id: detail.user_id,
-            share_amount: Math.round(Math.abs(tx.amount) * (detail.ratio_percent / 100)),
+            user_id: user1.id,
+            share_amount: user1Share,
+          });
+          shares.push({
+            moneyforward_id: tx.moneyforward_id,
+            user_id: user2.id,
+            share_amount: amount - user1Share,
+          });
+        } else {
+          // Fallback to 50/50
+          const shareAmount = Math.round(amount / users.length);
+          users.forEach((u, index) => {
+            shares.push({
+              moneyforward_id: tx.moneyforward_id,
+              user_id: u.id,
+              share_amount: (index === 0) ? amount - (shareAmount * (users.length - 1)) : shareAmount,
+            });
+          });
+        }
+      } else {
+        // Individual attribution (按分_{alias})
+        const userId = userAliasMap.get(target);
+        if (userId) {
+          shares.push({
+            moneyforward_id: tx.moneyforward_id,
+            user_id: userId,
+            share_amount: amount,
+          });
+          // Set 0 for other users
+          users.filter((u) => u.id !== userId).forEach((u) => {
+            shares.push({
+              moneyforward_id: tx.moneyforward_id,
+              user_id: u.id,
+              share_amount: 0,
+            });
           });
         }
       }

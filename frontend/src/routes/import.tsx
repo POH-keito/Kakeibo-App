@@ -13,7 +13,12 @@ interface ParsedTransaction {
   major_name: string;
   minor_name: string;
   memo: string | null;
-  is_excluded: boolean;
+  financial_institution: string;
+  is_calculation_target: boolean;
+  is_transfer: boolean;
+  processing_status: string;
+  applied_burden_ratio_id: number | null;
+  applied_exclusion_rule_id: number | null;
 }
 
 interface ImportResult {
@@ -270,7 +275,7 @@ function ImportPage() {
                 </thead>
                 <tbody>
                   {parseResult.transactions.slice(0, 20).map((tx, idx) => (
-                    <tr key={idx} className={tx.is_excluded ? 'text-gray-400' : ''}>
+                    <tr key={idx} className={tx.processing_status.startsWith('集計除外') ? 'text-gray-400' : ''}>
                       <td className="px-2 py-1">{tx.transaction_date}</td>
                       <td className="px-2 py-1">{tx.content}</td>
                       <td className="px-2 py-1">{tx.major_name} &gt; {tx.minor_name}</td>
