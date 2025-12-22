@@ -6,6 +6,7 @@ import {
   useBurdenRatio,
 } from '../lib/api';
 import type { EnrichedTransaction } from '../lib/types';
+import { TransactionsSkeleton } from '../components/Skeleton';
 
 export const Route = createFileRoute('/transactions')({
   component: TransactionsPage,
@@ -57,7 +58,9 @@ function TransactionsPage() {
         sorted.sort((a, b) => {
           const majorCompare = a.categoryMajorName.localeCompare(b.categoryMajorName);
           if (majorCompare !== 0) return majorCompare;
-          return a.categoryMinorName.localeCompare(b.categoryMinorName);
+          const minorCompare = a.categoryMinorName.localeCompare(b.categoryMinorName);
+          if (minorCompare !== 0) return minorCompare;
+          return b.transaction_date.localeCompare(a.transaction_date);
         });
         break;
       case 'amount':
@@ -68,56 +71,42 @@ function TransactionsPage() {
     return sorted;
   }, [filteredTransactions, sortMode]);
 
-  // Default burden ratio for this month
-  const defaultRatio = useMemo(() => {
-    if (!burdenRatio?.details || users.length === 0) return null;
-    const firstUser = users[0];
-    const firstDetail = burdenRatio.details.find((d) => d.user_id === firstUser.id);
-    return firstDetail?.ratio_percent || 50;
-  }, [burdenRatio, users]);
+  // Check if there are any pending changes
+  const hasPendingChanges = pendingChanges.size > 0;
 
-  // Handle slider change
-  const handleSliderChange = useCallback(
-    (moneyforwardId: string, firstUserPercent: number) => {
-      if (users.length < 2) return;
+  // Update share percentages for a transaction
+  const updateShares = useCallback((moneyforwardId: string, shares: { userId: number; percent: number }[]) => {
+    setPendingChanges((prev) => {
+      const next = new Map(prev);
+      next.set(moneyforwardId, shares);
+      return next;
+    });
+  }, []);
 
-      const newChanges = new Map(pendingChanges);
-      newChanges.set(moneyforwardId, [
-        { userId: users[0].id, percent: firstUserPercent },
-        { userId: users[1].id, percent: 100 - firstUserPercent },
-      ]);
-      setPendingChanges(newChanges);
-    },
-    [pendingChanges, users]
-  );
-
-  // Reset to default
-  const handleReset = useCallback(
-    (moneyforwardId: string) => {
-      const newChanges = new Map(pendingChanges);
-      newChanges.delete(moneyforwardId);
-      setPendingChanges(newChanges);
+  // Get current shares (with pending changes applied)
+  const getCurrentShares = useCallback(
+    (tx: EnrichedTransaction) => {
+      return pendingChanges.get(tx.moneyforward_id) || tx.userShares.map((s) => ({
+        userId: s.userId,
+        percent: s.percent,
+      }));
     },
     [pendingChanges]
   );
 
-  // Apply default to all
-  const handleApplyDefaultToAll = async () => {
-    if (!window.confirm('全ての取引にデフォルト按分を適用しますか？')) return;
+  // Apply default burden ratio to all transactions
+  const handleApplyDefault = async () => {
+    if (!burdenRatio?.details) return;
 
     setSaveStatus('saving');
     try {
-      const householdMfIds = groupedTransactions
-        .filter((tx) => tx.processing_status === '按分_家計')
-        .map((tx) => tx.moneyforward_id);
-
-      const res = await fetch('/api/shares/apply-default', {
+      const res = await fetch('/api/transactions/apply-default-ratio', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           year,
           month,
-          moneyforward_ids: householdMfIds,
+          ratioDetails: burdenRatio.details,
         }),
       });
 
@@ -138,23 +127,20 @@ function TransactionsPage() {
 
     setSaveStatus('saving');
     try {
-      const overrides: Array<{ moneyforward_id: string; user_id: number; value: number }> = [];
-
-      pendingChanges.forEach((shares, moneyforwardId) => {
+      const overrides = Array.from(pendingChanges.entries()).flatMap(([moneyforwardId, shares]) => {
         const tx = transactions.find((t) => t.moneyforward_id === moneyforwardId);
-        if (!tx) return;
+        if (!tx) return [];
 
-        shares.forEach((share) => {
-          overrides.push({
-            moneyforward_id: moneyforwardId,
-            user_id: share.userId,
-            value: Math.round(Math.abs(tx.amount) * (share.percent / 100)),
-          });
-        });
+        const totalAmount = Math.abs(tx.amount);
+        return shares.map((share) => ({
+          moneyforward_id: moneyforwardId,
+          user_id: share.userId,
+          value: Math.round((totalAmount * share.percent) / 100),
+        }));
       });
 
-      const res = await fetch('/api/shares/save-batch', {
-        method: 'POST',
+      const res = await fetch('/api/transactions/overrides', {
+        method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ overrides }),
       });
@@ -172,95 +158,89 @@ function TransactionsPage() {
   const years = Array.from({ length: 3 }, (_, i) => (now.getFullYear() - i).toString());
   const months = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'));
 
-  const ratioDisplay = useMemo(() => {
-    if (!burdenRatio?.details || !users.length) return null;
-    return burdenRatio.details
-      .map((d) => {
-        const user = users.find((u) => u.id === d.user_id);
-        return `${user?.aliases[0] || user?.name}: ${d.ratio_percent}%`;
-      })
-      .join(' / ');
-  }, [burdenRatio, users]);
+  const sortTabs: { key: SortMode; label: string }[] = [
+    { key: 'date-status', label: '日付→ステータス' },
+    { key: 'status-date', label: 'ステータス→日付' },
+    { key: 'category', label: 'カテゴリ' },
+    { key: 'amount', label: '金額' },
+  ];
 
   return (
     <div className="space-y-4">
-      <h2 className="text-2xl font-bold text-gray-900">取引詳細</h2>
-
       {/* Controls */}
-      <div className="flex flex-wrap items-center gap-4 rounded-lg bg-white p-4 shadow">
-        <select
-          value={year}
-          onChange={(e) => setYear(e.target.value)}
-          className="rounded border px-3 py-2"
-        >
-          {years.map((y) => (
-            <option key={y} value={y}>{y}年</option>
-          ))}
-        </select>
-        <select
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          className="rounded border px-3 py-2"
-        >
-          {months.map((m) => (
-            <option key={m} value={m}>{m}月</option>
-          ))}
-        </select>
+      <div className="rounded-lg bg-white p-4 shadow">
+        <div className="flex flex-wrap items-center gap-4">
+          <div className="flex items-center gap-2">
+            <select
+              value={year}
+              onChange={(e) => setYear(e.target.value)}
+              className="rounded border px-3 py-2"
+            >
+              {years.map((y) => (
+                <option key={y} value={y}>{y}年</option>
+              ))}
+            </select>
+            <select
+              value={month}
+              onChange={(e) => setMonth(e.target.value)}
+              className="rounded border px-3 py-2"
+            >
+              {months.map((m) => (
+                <option key={m} value={m}>{m}月</option>
+              ))}
+            </select>
+          </div>
 
-        <label className="flex items-center gap-2">
-          <input
-            type="checkbox"
-            checked={includeExcluded}
-            onChange={(e) => setIncludeExcluded(e.target.checked)}
-            className="h-4 w-4"
-          />
-          <span className="text-sm">按分対象外を表示</span>
-        </label>
+          <label className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              checked={includeExcluded}
+              onChange={(e) => setIncludeExcluded(e.target.checked)}
+              className="h-4 w-4"
+            />
+            <span className="text-sm">集計除外も表示</span>
+          </label>
 
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            onClick={handleApplyDefaultToAll}
-            className="rounded bg-gray-600 px-3 py-2 text-sm text-white hover:bg-gray-700"
-          >
-            デフォルト按分を適用
-          </button>
-          <button
-            onClick={handleSaveChanges}
-            disabled={pendingChanges.size === 0 || saveStatus === 'saving'}
-            className="rounded bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
-          >
-            {saveStatus === 'saving'
-              ? '保存中...'
-              : `変更を保存${pendingChanges.size > 0 ? ` (${pendingChanges.size}件)` : ''}`}
-          </button>
+          {burdenRatio && (
+            <button
+              onClick={handleApplyDefault}
+              disabled={saveStatus === 'saving'}
+              className="ml-auto rounded bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
+            >
+              デフォルト按分を適用
+            </button>
+          )}
+
+          {hasPendingChanges && (
+            <>
+              <div className="flex items-center gap-2 rounded bg-yellow-50 px-3 py-2">
+                <span className="text-sm text-yellow-800">
+                  {pendingChanges.size}件の変更があります
+                </span>
+              </div>
+              <button
+                onClick={handleSaveChanges}
+                disabled={saveStatus === 'saving'}
+                className="rounded bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+              >
+                変更を保存
+              </button>
+            </>
+          )}
+
+          {saveStatus === 'saving' && <span className="text-sm text-gray-500">保存中...</span>}
+          {saveStatus === 'saved' && <span className="text-sm text-green-600">保存完了</span>}
+          {saveStatus === 'error' && <span className="text-sm text-red-600">エラー</span>}
         </div>
       </div>
 
-      {/* Info bar */}
-      <div className="flex flex-wrap items-center gap-4 rounded-lg bg-gray-100 p-3 text-sm">
-        {ratioDisplay && (
-          <span className="text-gray-600">今月のデフォルト按分: {ratioDisplay}</span>
-        )}
-        {saveStatus === 'saved' && (
-          <span className="text-green-600">保存完了</span>
-        )}
-        {saveStatus === 'error' && (
-          <span className="text-red-600">保存エラー</span>
-        )}
-      </div>
-
       {/* Sort tabs */}
-      <div className="flex gap-2 border-b">
-        {[
-          { key: 'date-status', label: '日付・ステータス順' },
-          { key: 'status-date', label: 'ステータス・日付順' },
-          { key: 'category', label: 'カテゴリ順' },
-          { key: 'amount', label: '金額順' },
-        ].map((tab) => (
+      <div className="flex gap-4 border-b bg-white px-4">
+        {sortTabs.map((tab) => (
           <button
             key={tab.key}
-            onClick={() => setSortMode(tab.key as SortMode)}
-            className={`px-4 py-2 text-sm ${
+            onClick={() => setSortMode(tab.key)}
+            className={`px-4 py-3 text-sm transition-colors ${
               sortMode === tab.key
                 ? 'border-b-2 border-blue-600 font-medium text-blue-600'
                 : 'text-gray-600 hover:text-gray-900'
@@ -273,9 +253,7 @@ function TransactionsPage() {
 
       {/* Transaction list */}
       {isLoading ? (
-        <div className="flex h-64 items-center justify-center">
-          <div className="text-lg text-gray-600">読み込み中...</div>
-        </div>
+        <TransactionsSkeleton />
       ) : (
         <div className="space-y-2">
           {groupedTransactions.map((tx) => (
@@ -283,12 +261,16 @@ function TransactionsPage() {
               key={tx.moneyforward_id}
               transaction={tx}
               users={users}
-              defaultRatio={defaultRatio}
-              pendingChange={pendingChanges.get(tx.moneyforward_id)}
-              onSliderChange={(percent) => handleSliderChange(tx.moneyforward_id, percent)}
-              onReset={() => handleReset(tx.moneyforward_id)}
+              currentShares={getCurrentShares(tx)}
+              onUpdateShares={(shares) => updateShares(tx.moneyforward_id, shares)}
             />
           ))}
+
+          {groupedTransactions.length === 0 && (
+            <div className="rounded-lg bg-white p-8 text-center text-gray-500">
+              取引がありません
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -296,100 +278,151 @@ function TransactionsPage() {
 }
 
 function TransactionRow({
-  transaction: tx,
+  transaction,
   users,
-  defaultRatio,
-  pendingChange,
-  onSliderChange,
-  onReset,
+  currentShares,
+  onUpdateShares,
 }: {
   transaction: EnrichedTransaction;
   users: { id: number; name: string; aliases: string[] }[];
-  defaultRatio: number | null;
-  pendingChange?: { userId: number; percent: number }[];
-  onSliderChange: (percent: number) => void;
-  onReset: () => void;
+  currentShares: { userId: number; percent: number }[];
+  onUpdateShares: (shares: { userId: number; percent: number }[]) => void;
 }) {
-  const isHousehold = tx.processing_status === '按分_家計';
+  const [isEditing, setIsEditing] = useState(false);
+  const [editShares, setEditShares] = useState(currentShares);
 
-  // Current percentage for first user
-  const currentPercent = useMemo(() => {
-    if (pendingChange) {
-      return pendingChange[0]?.percent || 50;
-    }
-    const firstShare = tx.userShares.find((s) => s.userId === users[0]?.id);
-    return firstShare?.percent || defaultRatio || 50;
-  }, [pendingChange, tx.userShares, users, defaultRatio]);
+  const handleEditStart = () => {
+    setEditShares(currentShares);
+    setIsEditing(true);
+  };
 
-  // Determine slider color
-  const sliderColor = useMemo(() => {
-    if (pendingChange) return 'border-red-500'; // Has pending change
-    if (tx.hasOverrides) return 'border-red-300'; // Has saved override
-    return 'border-green-500'; // Using default
-  }, [pendingChange, tx.hasOverrides]);
+  const handleEditCancel = () => {
+    setIsEditing(false);
+  };
+
+  const handleEditSave = () => {
+    onUpdateShares(editShares);
+    setIsEditing(false);
+  };
+
+  const updatePercent = (userId: number, value: string) => {
+    const percent = parseFloat(value) || 0;
+    setEditShares((prev) =>
+      prev.map((s) => (s.userId === userId ? { ...s, percent } : s))
+    );
+  };
+
+  const totalPercent = editShares.reduce((sum, s) => sum + s.percent, 0);
+  const isValidTotal = Math.abs(totalPercent - 100) < 0.01;
 
   return (
-    <div className={`rounded-lg bg-white p-4 shadow ${
-      tx.processing_status.startsWith('集計除外') ? 'opacity-60' : ''
-    }`}>
-      <div className="flex flex-wrap items-start gap-4">
-        {/* Date & Status */}
-        <div className="w-32">
-          <div className="text-sm font-medium">{tx.transaction_date}</div>
-          <div className="text-xs text-gray-500">{tx.processing_status}</div>
-        </div>
-
-        {/* Content & Category */}
-        <div className="flex-1 min-w-48">
-          <div className="font-medium">{tx.content}</div>
-          <div className="text-sm text-gray-500">
-            {tx.categoryMajorName} &gt; {tx.categoryMinorName}
+    <div className="rounded-lg bg-white p-4 shadow">
+      <div className="flex items-start justify-between">
+        <div className="flex-1">
+          <div className="flex items-center gap-3">
+            <span className="font-medium">{transaction.transaction_date}</span>
+            <span className="text-sm text-gray-600">{transaction.content}</span>
+            <span
+              className={`rounded px-2 py-0.5 text-xs ${
+                transaction.processing_status === '按分_家計'
+                  ? 'bg-blue-100 text-blue-800'
+                  : transaction.processing_status.startsWith('集計除外')
+                  ? 'bg-gray-100 text-gray-600'
+                  : 'bg-green-100 text-green-800'
+              }`}
+            >
+              {transaction.processing_status}
+            </span>
           </div>
-        </div>
-
-        {/* Amount */}
-        <div className="w-28 text-right">
-          <div className="text-lg font-bold">
-            ¥{Math.abs(tx.amount).toLocaleString()}
-          </div>
-          <div className="text-xs text-gray-500">{tx.costType}</div>
-        </div>
-
-        {/* Slider (only for household transactions) */}
-        {isHousehold && users.length >= 2 && (
-          <div className={`w-64 rounded border-2 p-2 ${sliderColor}`}>
-            <div className="mb-1 flex justify-between text-xs">
-              <span>{users[0]?.aliases[0] || users[0]?.name}: {currentPercent}%</span>
-              <span>{users[1]?.aliases[0] || users[1]?.name}: {100 - currentPercent}%</span>
-            </div>
-            <input
-              type="range"
-              min="0"
-              max="100"
-              value={currentPercent}
-              onChange={(e) => onSliderChange(Number(e.target.value))}
-              className="w-full"
-            />
-            <div className="mt-1 flex justify-between text-xs text-gray-500">
-              <span>¥{Math.round(Math.abs(tx.amount) * currentPercent / 100).toLocaleString()}</span>
-              <span>¥{Math.round(Math.abs(tx.amount) * (100 - currentPercent) / 100).toLocaleString()}</span>
-            </div>
-            {(pendingChange || tx.hasOverrides) && (
-              <button
-                onClick={onReset}
-                className="mt-1 text-xs text-blue-600 hover:underline"
-              >
-                デフォルトに戻す
-              </button>
+          <div className="mt-1 flex items-center gap-3 text-sm text-gray-600">
+            <span>
+              {transaction.categoryMajorName}
+              {transaction.categoryMinorName && ` / ${transaction.categoryMinorName}`}
+            </span>
+            {transaction.costType && (
+              <span className="text-xs text-gray-500">[{transaction.costType}]</span>
             )}
           </div>
-        )}
+        </div>
+
+        <div className="text-right">
+          <div className="text-lg font-semibold">¥{Math.abs(transaction.amount).toLocaleString()}</div>
+          {transaction.hasOverrides && (
+            <span className="text-xs text-orange-600">※カスタム按分</span>
+          )}
+        </div>
       </div>
 
-      {/* Memo */}
-      {tx.memo && (
-        <div className="mt-2 text-sm text-gray-600">
-          メモ: {tx.memo}
+      {/* Share breakdown */}
+      {transaction.processing_status === '按分_家計' && (
+        <div className="mt-3 border-t pt-3">
+          {!isEditing ? (
+            <div className="flex items-center justify-between">
+              <div className="flex gap-4">
+                {currentShares.map((share) => {
+                  const user = users.find((u) => u.id === share.userId);
+                  const alias = user?.aliases[0] || user?.name || `User ${share.userId}`;
+                  return (
+                    <div key={share.userId} className="text-sm">
+                      <span className="font-medium">{alias}:</span>{' '}
+                      <span className="text-gray-700">{share.percent.toFixed(1)}%</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <button
+                onClick={handleEditStart}
+                className="text-sm text-blue-600 hover:text-blue-800"
+              >
+                按分を編集
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="flex flex-wrap gap-4">
+                {editShares.map((share) => {
+                  const user = users.find((u) => u.id === share.userId);
+                  const alias = user?.aliases[0] || user?.name || `User ${share.userId}`;
+                  return (
+                    <div key={share.userId} className="flex items-center gap-2">
+                      <span className="text-sm font-medium">{alias}:</span>
+                      <input
+                        type="number"
+                        value={share.percent}
+                        onChange={(e) => updatePercent(share.userId, e.target.value)}
+                        className="w-20 rounded border px-2 py-1 text-sm"
+                        step="0.1"
+                      />
+                      <span className="text-sm">%</span>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex items-center justify-between">
+                <div className="text-sm">
+                  合計: {totalPercent.toFixed(1)}%
+                  {!isValidTotal && (
+                    <span className="ml-2 text-red-600">※合計が100%ではありません</span>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={handleEditCancel}
+                    className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
+                  >
+                    キャンセル
+                  </button>
+                  <button
+                    onClick={handleEditSave}
+                    disabled={!isValidTotal}
+                    className="rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+                  >
+                    OK
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>

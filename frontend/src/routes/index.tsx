@@ -11,10 +11,25 @@ import {
   calculateCostTypeSummary,
   calculateCategorySummary,
 } from '../lib/api';
+import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
 
 export const Route = createFileRoute('/')({
   component: DashboardPage,
 });
+
+// Color palette for pie chart
+const COLORS = [
+  '#2b6cb0', // Blue
+  '#4299e1', // Light Blue
+  '#2f855a', // Green
+  '#e53e3e', // Red
+  '#d69e2e', // Yellow
+  '#805ad5', // Purple
+  '#38b2ac', // Teal
+  '#ed8936', // Orange
+  '#dd6b20', // Dark Orange
+  '#718096', // Gray
+];
 
 function DashboardPage() {
   const now = new Date();
@@ -148,6 +163,38 @@ function DashboardPage() {
             {/* Category Summary */}
             <div className="rounded-lg bg-white p-6 shadow">
               <h3 className="mb-4 text-lg font-semibold">カテゴリ別支出</h3>
+
+              {/* Pie Chart */}
+              {pieChartData.length > 0 && (
+                <div className="mb-6 h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieChartData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        label={(entry: { value: number }) => `¥${entry.value.toLocaleString()}`}
+                        labelLine={true}
+                      >
+                        {pieChartData.map((_, index: number) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: number | undefined) =>
+                          value !== undefined ? `¥${value.toLocaleString()}` : ''
+                        }
+                      />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* List View */}
               <div className="space-y-2">
                 {Object.entries(categorySummary)
                   .sort(([, a], [, b]) => b.amount - a.amount)

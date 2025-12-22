@@ -1,16 +1,24 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useMemo } from 'react';
-import { useTags, useTransactions, useTransactionTags, useCategories } from '../lib/api';
+import { useTags, useTransactions, useTransactionTags, useCategories, useBulkAssignTags } from '../lib/api';
+import { CalendarView, DayTransactionModal } from '../components/CalendarView';
+import type { Transaction } from '../lib/types';
 
 export const Route = createFileRoute('/tags')({
   component: TagsPage,
 });
+
+type ViewMode = 'summary' | 'calendar';
 
 function TagsPage() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear().toString());
   const [month, setMonth] = useState((now.getMonth() + 1).toString().padStart(2, '0'));
   const [expandedTags, setExpandedTags] = useState<Set<number>>(new Set());
+  const [viewMode, setViewMode] = useState<ViewMode>('summary');
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalDate, setModalDate] = useState('');
+  const [modalTransactions, setModalTransactions] = useState<Transaction[]>([]);
 
   const { data: tags = [] } = useTags();
   const { data: transactions = [], isLoading } = useTransactions(year, month, true);
@@ -18,6 +26,8 @@ function TagsPage() {
 
   const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id);
   const { data: transactionTags = [] } = useTransactionTags(moneyforwardIds);
+
+  const assignTags = useBulkAssignTags();
 
   // Group transactions by tag
   const tagSummary = useMemo(() => {
@@ -53,6 +63,48 @@ function TagsPage() {
     setExpandedTags(next);
   };
 
+  const handleDayClick = (date: string, dayTransactions: Transaction[]) => {
+    setModalDate(date);
+    setModalTransactions(dayTransactions);
+    setModalOpen(true);
+  };
+
+  const handleSaveTagChanges = async (changes: { moneyforward_id: string; tag_ids: number[] }[]) => {
+    // For each transaction, sync tags by:
+    // 1. Remove all existing tags
+    // 2. Add all new tags
+    for (const { moneyforward_id, tag_ids } of changes) {
+      const currentTags = transactionTags
+        .filter((tt) => tt.moneyforward_id === moneyforward_id)
+        .map((tt) => tt.tag_id);
+
+      const currentSet = new Set(currentTags);
+      const newSet = new Set(tag_ids);
+
+      // Find tags to add
+      const toAdd = tag_ids.filter((id) => !currentSet.has(id));
+      // Find tags to remove
+      const toRemove = currentTags.filter((id) => !newSet.has(id));
+
+      // Execute additions
+      for (const tagId of toAdd) {
+        await assignTags.mutateAsync({
+          tag_id: tagId,
+          moneyforward_ids: [moneyforward_id],
+        });
+      }
+
+      // Execute removals via API
+      for (const tagId of toRemove) {
+        await fetch(`/api/tags/unassign`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ tag_id: tagId, moneyforward_ids: [moneyforward_id] }),
+        });
+      }
+    }
+  };
+
   const years = Array.from({ length: 3 }, (_, i) => (now.getFullYear() - i).toString());
   const months = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'));
 
@@ -61,31 +113,77 @@ function TagsPage() {
       <h2 className="text-2xl font-bold text-gray-900">タグ別集計</h2>
 
       {/* Controls */}
-      <div className="flex items-center gap-4 rounded-lg bg-white p-4 shadow">
-        <select
-          value={year}
-          onChange={(e) => setYear(e.target.value)}
-          className="rounded border px-3 py-2"
-        >
-          {years.map((y) => (
-            <option key={y} value={y}>{y}年</option>
-          ))}
-        </select>
-        <select
-          value={month}
-          onChange={(e) => setMonth(e.target.value)}
-          className="rounded border px-3 py-2"
-        >
-          {months.map((m) => (
-            <option key={m} value={m}>{m}月</option>
-          ))}
-        </select>
+      <div className="flex items-center justify-between rounded-lg bg-white p-4 shadow">
+        <div className="flex items-center gap-4">
+          <select
+            value={year}
+            onChange={(e) => setYear(e.target.value)}
+            className="rounded border px-3 py-2"
+          >
+            {years.map((y) => (
+              <option key={y} value={y}>{y}年</option>
+            ))}
+          </select>
+          <select
+            value={month}
+            onChange={(e) => setMonth(e.target.value)}
+            className="rounded border px-3 py-2"
+          >
+            {months.map((m) => (
+              <option key={m} value={m}>{m}月</option>
+            ))}
+          </select>
+        </div>
+
+        {/* View mode toggle */}
+        <div className="flex items-center gap-2 rounded-lg border bg-gray-100 p-1">
+          <button
+            onClick={() => setViewMode('summary')}
+            className={`rounded px-4 py-2 text-sm font-medium transition-colors ${
+              viewMode === 'summary'
+                ? 'bg-white text-gray-900 shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            集計ビュー
+          </button>
+          <button
+            onClick={() => setViewMode('calendar')}
+            className={`rounded px-4 py-2 text-sm font-medium transition-colors ${
+              viewMode === 'calendar'
+                ? 'bg-white text-gray-900 shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            カレンダービュー
+          </button>
+        </div>
       </div>
 
       {isLoading ? (
         <div className="flex h-64 items-center justify-center">
           <div className="text-lg text-gray-600">読み込み中...</div>
         </div>
+      ) : viewMode === 'calendar' ? (
+        <>
+          <CalendarView
+            year={year}
+            month={month}
+            transactions={transactions}
+            tags={tags}
+            transactionTags={transactionTags}
+            onDayClick={handleDayClick}
+          />
+          <DayTransactionModal
+            isOpen={modalOpen}
+            onClose={() => setModalOpen(false)}
+            date={modalDate}
+            transactions={modalTransactions}
+            tags={tags}
+            transactionTags={transactionTags}
+            onSave={handleSaveTagChanges}
+          />
+        </>
       ) : tagSummary.length === 0 ? (
         <div className="rounded-lg bg-white p-6 text-center text-gray-500 shadow">
           タグ付きの取引がありません
