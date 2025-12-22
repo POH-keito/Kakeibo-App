@@ -17,21 +17,54 @@ import type {
 
 const API_BASE = '/api';
 
-async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
-
-  if (!res.ok) {
-    const error = await res.json().catch(() => ({ message: 'Unknown error' }));
-    throw new Error(error.message || error.error || `HTTP ${res.status}`);
+export class ApiError extends Error {
+  constructor(
+    public statusCode: number,
+    public message: string,
+    public code?: string
+  ) {
+    super(message);
+    this.name = 'ApiError';
   }
+}
 
-  return res.json();
+async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
+  try {
+    const res = await fetch(`${API_BASE}${path}`, {
+      ...options,
+      headers: {
+        'Content-Type': 'application/json',
+        ...options?.headers,
+      },
+    });
+
+    if (!res.ok) {
+      // Try to parse error response
+      const errorData = await res.json().catch(() => null);
+
+      if (errorData?.error) {
+        // Structured error response from backend
+        throw new ApiError(
+          errorData.error.statusCode || res.status,
+          errorData.error.message || 'エラーが発生しました',
+          errorData.error.code
+        );
+      }
+
+      // Fallback for non-structured errors
+      throw new ApiError(res.status, `HTTPエラー: ${res.status}`);
+    }
+
+    return res.json();
+  } catch (err) {
+    // Network errors (offline, timeout, etc.)
+    if (err instanceof TypeError && err.message.includes('fetch')) {
+      throw new ApiError(0, 'ネットワークエラーが発生しました。インターネット接続を確認してください。');
+    }
+
+    // Re-throw ApiError and other errors
+    throw err;
+  }
 }
 
 // Master data hooks (low-frequency updates)

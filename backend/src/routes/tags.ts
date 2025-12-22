@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { ncb, type Tag, type TransactionTag } from '../lib/ncb.js';
 import { requireAdmin, type AuthUser } from '../middleware/auth.js';
+import { ValidationError, NotFoundError, ConflictError } from '../lib/errors.js';
 
 const HOUSEHOLD_ID = 1;
 
@@ -21,7 +22,7 @@ app.post('/', async (c) => {
   const body = await c.req.json<{ name: string; color?: string }>();
 
   if (!body.name || body.name.trim() === '') {
-    return c.json({ error: 'Tag name is required' }, 400);
+    throw new ValidationError('タグ名は必須です');
   }
 
   // Check for duplicate name
@@ -33,7 +34,7 @@ app.post('/', async (c) => {
   });
 
   if (existing.length > 0) {
-    return c.json({ error: 'Tag with this name already exists' }, 400);
+    throw new ConflictError('このタグ名は既に使用されています');
   }
 
   const created = await ncb.create<Tag>('tags', {
@@ -54,7 +55,7 @@ app.put('/:id', async (c) => {
   const body = await c.req.json<{ name?: string; color?: string }>();
 
   if (isNaN(id)) {
-    return c.json({ error: 'Invalid tag ID' }, 400);
+    throw new ValidationError('無効なタグIDです');
   }
 
   // Check if tag exists
@@ -63,7 +64,7 @@ app.put('/:id', async (c) => {
   });
 
   if (existing.length === 0) {
-    return c.json({ error: 'Tag not found' }, 404);
+    throw new NotFoundError('タグが見つかりません');
   }
 
   // Check for duplicate name if name is being updated
@@ -76,7 +77,7 @@ app.put('/:id', async (c) => {
     });
 
     if (duplicate.length > 0) {
-      return c.json({ error: 'Tag with this name already exists' }, 400);
+      throw new ConflictError('このタグ名は既に使用されています');
     }
   }
 
@@ -97,7 +98,7 @@ app.delete('/:id', async (c) => {
   const id = parseInt(c.req.param('id'), 10);
 
   if (isNaN(id)) {
-    return c.json({ error: 'Invalid tag ID' }, 400);
+    throw new ValidationError('無効なタグIDです');
   }
 
   // First delete all transaction_tags referencing this tag
@@ -117,7 +118,7 @@ app.get('/:id/transactions', async (c) => {
   const id = parseInt(c.req.param('id'), 10);
 
   if (isNaN(id)) {
-    return c.json({ error: 'Invalid tag ID' }, 400);
+    throw new ValidationError('無効なタグIDです');
   }
 
   const transactionTags = await ncb.list<TransactionTag>('transaction_tags', {
@@ -144,7 +145,7 @@ app.post('/assign', async (c) => {
   const { tag_id, moneyforward_ids } = body;
 
   if (!tag_id || !moneyforward_ids || moneyforward_ids.length === 0) {
-    return c.json({ error: 'tag_id and moneyforward_ids are required' }, 400);
+    throw new ValidationError('タグIDと取引IDは必須です');
   }
 
   // Create transaction_tags entries
@@ -174,7 +175,7 @@ app.post('/unassign', async (c) => {
   const { tag_id, moneyforward_ids } = body;
 
   if (!tag_id || !moneyforward_ids || moneyforward_ids.length === 0) {
-    return c.json({ error: 'tag_id and moneyforward_ids are required' }, 400);
+    throw new ValidationError('タグIDと取引IDは必須です');
   }
 
   // Delete transaction_tags entries
