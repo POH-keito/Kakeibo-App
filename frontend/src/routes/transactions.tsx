@@ -14,7 +14,7 @@ export const Route = createFileRoute('/transactions')({
   component: TransactionsPage,
 });
 
-type SortMode = 'date-status' | 'status-date' | 'category' | 'amount';
+type SortMode = 'date-status' | 'status-date' | 'status-category' | 'status-category-amount' | 'category' | 'amount';
 
 function TransactionsPage() {
   const now = new Date();
@@ -54,6 +54,26 @@ function TransactionsPage() {
           const statusCompare = a.processing_status.localeCompare(b.processing_status);
           if (statusCompare !== 0) return statusCompare;
           return b.transaction_date.localeCompare(a.transaction_date);
+        });
+        break;
+      case 'status-category':
+        sorted.sort((a, b) => {
+          const statusCompare = a.processing_status.localeCompare(b.processing_status);
+          if (statusCompare !== 0) return statusCompare;
+          const majorCompare = a.categoryMajorName.localeCompare(b.categoryMajorName);
+          if (majorCompare !== 0) return majorCompare;
+          return a.categoryMinorName.localeCompare(b.categoryMinorName);
+        });
+        break;
+      case 'status-category-amount':
+        sorted.sort((a, b) => {
+          const statusCompare = a.processing_status.localeCompare(b.processing_status);
+          if (statusCompare !== 0) return statusCompare;
+          const majorCompare = a.categoryMajorName.localeCompare(b.categoryMajorName);
+          if (majorCompare !== 0) return majorCompare;
+          const minorCompare = a.categoryMinorName.localeCompare(b.categoryMinorName);
+          if (minorCompare !== 0) return minorCompare;
+          return Math.abs(b.amount) - Math.abs(a.amount);
         });
         break;
       case 'category':
@@ -159,6 +179,8 @@ function TransactionsPage() {
   const sortTabs: { key: SortMode; label: string }[] = [
     { key: 'date-status', label: '日付→ステータス' },
     { key: 'status-date', label: 'ステータス→日付' },
+    { key: 'status-category', label: 'ステータス→カテゴリ' },
+    { key: 'status-category-amount', label: 'ステータス→カテゴリ→金額' },
     { key: 'category', label: 'カテゴリ' },
     { key: 'amount', label: '金額' },
   ];
