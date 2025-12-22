@@ -165,6 +165,12 @@ function TransactionsPage() {
     { key: 'amount', label: '金額' },
   ];
 
+  // Export CSV
+  const handleExport = () => {
+    const url = `/api/transactions/export?year=${year}&month=${month}`;
+    window.location.href = url;
+  };
+
   return (
     <div className="space-y-4">
       {/* Controls */}
@@ -200,6 +206,13 @@ function TransactionsPage() {
             />
             <span className="text-sm">集計除外も表示</span>
           </label>
+
+          <button
+            onClick={handleExport}
+            className="rounded bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700"
+          >
+            CSVエクスポート
+          </button>
 
           {burdenRatio && (
             <button
