@@ -8,10 +8,23 @@ import {
   useBurdenRatio,
   useMonthlyMemo,
   useSaveMonthlyMemo,
+  useCostTrend,
   calculateCostTypeSummary,
   calculateCategorySummary,
 } from '../lib/api';
-import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
+import {
+  PieChart,
+  Pie,
+  Cell,
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  ResponsiveContainer,
+  Legend,
+  Tooltip,
+} from 'recharts';
 import { TransactionModal } from '../components/TransactionModal';
 
 export const Route = createFileRoute('/')({
@@ -46,6 +59,7 @@ function DashboardPage() {
   const { data: summary } = useMonthlySummary(year, month, includeTagged);
   const { data: burdenRatio } = useBurdenRatio(year, month);
   const { data: memo } = useMonthlyMemo(targetMonth);
+  const { data: costTrend = [] } = useCostTrend(6);
   const saveMemo = useSaveMonthlyMemo();
 
   const [memoContent, setMemoContent] = useState('');
@@ -221,6 +235,32 @@ function DashboardPage() {
               />
             ))}
           </div>
+
+          {/* Cost Trend Chart */}
+          {costTrend.length > 0 && (
+            <div className="rounded-lg bg-white p-6 shadow">
+              <h3 className="mb-4 text-lg font-semibold">固定費vs変動費の推移</h3>
+              <div className="h-80">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={costTrend}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="month" />
+                    <YAxis
+                      tickFormatter={(value) => `¥${(value / 1000).toFixed(0)}k`}
+                    />
+                    <Tooltip
+                      formatter={(value: number) => `¥${value.toLocaleString()}`}
+                      labelFormatter={(label) => `${label}`}
+                    />
+                    <Legend />
+                    <Bar dataKey="固定費" stackId="a" fill="#2563eb" />
+                    <Bar dataKey="変動費" stackId="a" fill="#10b981" />
+                    <Bar dataKey="その他" stackId="a" fill="#6b7280" />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          )}
 
           {/* Category Pie Chart & Cost Type Breakdown */}
           <div className="grid gap-6 lg:grid-cols-2">

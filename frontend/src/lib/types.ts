@@ -100,6 +100,13 @@ export interface CategorySummary {
   amount: number;
 }
 
+export interface CostTrendData {
+  month: string;
+  固定費: number;
+  変動費: number;
+  その他: number;
+}
+
 // AI types
 export interface ChatMessage {
   role: 'user' | 'model';
