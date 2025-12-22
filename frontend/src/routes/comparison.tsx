@@ -43,6 +43,8 @@ function ComparisonPage() {
   const summaryQueries = [sum0, sum1, sum2, sum3];
 
   const isLoading = transactionQueries.some((q) => q.isLoading) || summaryQueries.some((q) => q.isLoading);
+  const isError = transactionQueries.some((q) => q.isError) || summaryQueries.some((q) => q.isError);
+  const errorMessage = [...transactionQueries, ...summaryQueries].find((q) => q.error)?.error?.message;
 
   // Calculate category totals for each month
   const categoryByMonth = useMemo(() => {
@@ -132,6 +134,16 @@ function ComparisonPage() {
       )
     }));
   }, [months, users, userSharesByMonth]);
+
+  if (isError) {
+    return (
+      <div className="flex h-64 items-center justify-center">
+        <div className="text-lg text-red-600">
+          データの取得に失敗しました: {errorMessage || '不明なエラー'}
+        </div>
+      </div>
+    );
+  }
 
   if (isLoading) {
     return (
