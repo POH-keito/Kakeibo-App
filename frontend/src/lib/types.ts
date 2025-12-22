@@ -87,11 +87,25 @@ export interface EnrichedTransaction extends Transaction {
 }
 
 // Summary types
+export interface MajorCategorySummary {
+  total: number;
+  byMinor: Record<string, number>;
+}
+
+export interface CostTypeHierarchy {
+  total: number;
+  byMajor: Record<string, MajorCategorySummary>;
+}
+
 export interface MonthlySummary {
   totalSpending: number;
   byCategory: Record<string, number>;
   byCostType: Record<string, number>;
+  // 3-level hierarchy (costType -> major -> minor)
+  byCostTypeHierarchy: Record<string, CostTypeHierarchy>;
   userShares: Record<number, number>;
+  // Tatekae (立替) tracking per user
+  userTatekae: Record<number, number>;
   transactionCount: number;
 }
 

@@ -268,13 +268,22 @@ app.get('/summary', zValidator('query', yearMonthQuerySchema), async (c) => {
     transactions = transactions.filter((tx) => !taggedMfIds.has(tx.moneyforward_id.trim()));
   }
 
-  // Filter only household expenses (按分_家計)
-  const householdTransactions = transactions.filter(
-    (tx) => tx.processing_status === '按分_家計'
-  );
+  // Create category map for cost type lookup
+  const categoryMap = new Map(categories.map((c) => [c.id, c]));
+
+  // Filter transactions for summary:
+  // - 按分_家計 for main household expenses
+  // - 立替 for tatekae tracking
+  const relevantTransactions = transactions.filter((tx) => {
+    if (tx.processing_status === '按分_家計') return true;
+    // Check if it's a tatekae transaction
+    const cat = tx.category_id ? categoryMap.get(tx.category_id) : null;
+    if (cat?.cost_type === '立替') return true;
+    return false;
+  });
 
   // Get shares and overrides for user breakdown
-  const moneyforwardIds = householdTransactions.map((tx) => tx.moneyforward_id.trim());
+  const moneyforwardIds = relevantTransactions.map((tx) => tx.moneyforward_id.trim());
   let sharesMap = new Map<string, TransactionShare[]>();
   let overridesMap = new Map<string, TransactionShareOverride[]>();
 
@@ -311,39 +320,40 @@ app.get('/summary', zValidator('query', yearMonthQuerySchema), async (c) => {
     });
   }
 
-  // Create category map
-  const categoryMap = new Map(categories.map((c) => [c.id, c]));
-
   // Calculate summary using business logic
   const byCategory: Record<string, number> = {};
   const byCostType: Record<string, number> = {};
+  const byCostTypeHierarchy: Record<string, { total: number; byMajor: Record<string, { total: number; byMinor: Record<string, number> }> }> = {
+    '固定': { total: 0, byMajor: {} },
+    '変動': { total: 0, byMajor: {} },
+  };
   const userShares: Record<number, number> = {};
+  const userTatekae: Record<number, number> = {};
 
-  // Initialize user shares
-  users.forEach((u) => { userShares[u.id] = 0; });
+  // Initialize user shares and tatekae
+  users.forEach((u) => {
+    userShares[u.id] = 0;
+    userTatekae[u.id] = 0;
+  });
 
   // Build user alias map for share calculation
   const userAliasMap = new Map<number, string>();
 
-  for (const tx of householdTransactions) {
-    const amount = Math.abs(tx.amount);
+  let householdCount = 0;
+
+  for (const tx of relevantTransactions) {
     const category = tx.category_id ? categoryMap.get(tx.category_id) : undefined;
-    const mfId = tx.moneyforward_id.trim();
-
-    // By major category
-    const majorName = category?.major_name || '未分類';
-    byCategory[majorName] = (byCategory[majorName] || 0) + amount;
-
-    // By cost type
     const costType = category?.cost_type || '変動';
-    byCostType[costType] = (byCostType[costType] || 0) + amount;
+    const majorName = category?.major_name || '未分類';
+    const minorName = category?.minor_name || '未分類';
+    const mfId = tx.moneyforward_id.trim();
 
     // Calculate shares using business logic
     const txShares = sharesMap.get(mfId) || [];
     const txOverrides = overridesMap.get(mfId) || [];
 
     const shareResult = calculateShares({
-      amount,
+      amount: Math.abs(tx.amount),
       processingStatus: tx.processing_status,
       transactionDate: tx.transaction_date,
       users: users.map((u) => ({ id: u.id, name: u.name })),
@@ -368,6 +378,46 @@ app.get('/summary', zValidator('query', yearMonthQuerySchema), async (c) => {
       })),
     });
 
+    // Handle Tatekae (立替) separately
+    if (costType === '立替') {
+      // Find the payer (user with positive share amount)
+      const payer = shareResult.shares.find((s) => s.amount > 0);
+      if (payer) {
+        userTatekae[payer.userId] = (userTatekae[payer.userId] || 0) + Math.abs(tx.amount);
+      }
+      // Add negative shares to userShares (the amount owed)
+      for (const share of shareResult.shares) {
+        if (share.amount > 0) continue;
+        userShares[share.userId] = (userShares[share.userId] || 0) + share.amount;
+      }
+      continue;
+    }
+
+    // Only process 按分_家計 for main summary
+    if (tx.processing_status !== '按分_家計') continue;
+
+    householdCount++;
+    const amount = Math.abs(tx.amount);
+
+    // By major category
+    byCategory[majorName] = (byCategory[majorName] || 0) + amount;
+
+    // By cost type (flat)
+    byCostType[costType] = (byCostType[costType] || 0) + amount;
+
+    // By cost type hierarchy (3-level)
+    if (costType === '固定' || costType === '変動') {
+      const costGroup = byCostTypeHierarchy[costType];
+      costGroup.total += amount;
+
+      if (!costGroup.byMajor[majorName]) {
+        costGroup.byMajor[majorName] = { total: 0, byMinor: {} };
+      }
+      costGroup.byMajor[majorName].total += amount;
+      costGroup.byMajor[majorName].byMinor[minorName] =
+        (costGroup.byMajor[majorName].byMinor[minorName] || 0) + amount;
+    }
+
     // Sum up user shares
     for (const share of shareResult.shares) {
       userShares[share.userId] = (userShares[share.userId] || 0) + share.amount;
@@ -380,8 +430,10 @@ app.get('/summary', zValidator('query', yearMonthQuerySchema), async (c) => {
     totalSpending,
     byCategory,
     byCostType,
+    byCostTypeHierarchy,
     userShares,
-    transactionCount: householdTransactions.length,
+    userTatekae,
+    transactionCount: householdCount,
   });
 });
 

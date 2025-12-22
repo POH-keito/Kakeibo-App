@@ -98,11 +98,30 @@ export interface EnrichedTransaction {
   memo: string | null;
 }
 
+// 3-level hierarchy for cost type breakdown
+export interface MinorCategorySummary {
+  [minorName: string]: number;
+}
+
+export interface MajorCategorySummary {
+  total: number;
+  byMinor: MinorCategorySummary;
+}
+
+export interface CostTypeHierarchy {
+  total: number;
+  byMajor: Record<string, MajorCategorySummary>;
+}
+
 export interface MonthlySummary {
   totalSpending: number;
   byCategory: Record<string, number>;
   byCostType: Record<string, number>;
+  // New: 3-level hierarchy (costType -> major -> minor)
+  byCostTypeHierarchy: Record<string, CostTypeHierarchy>;
   userShares: Record<number, number>;
+  // New: Tatekae (立替) tracking per user
+  userTatekae: Record<number, number>;
   transactionCount: number;
 }
 
@@ -418,7 +437,10 @@ function calculateEqualShares(amount: number, users: User[]): CalculateSharesRes
 /**
  * Calculate monthly summary statistics.
  *
- * Only includes transactions with processing_status === '按分_家計'
+ * Includes:
+ * - Household transactions (按分_家計) for main summary
+ * - Tatekae (立替) tracking per user
+ * - 3-level cost type hierarchy (costType -> major -> minor)
  */
 export function calculateMonthlySummary(
   transactions: Array<{
@@ -430,31 +452,76 @@ export function calculateMonthlySummary(
   categories: Category[],
   users: User[]
 ): MonthlySummary {
-  // Only include household transactions
-  const householdTransactions = transactions.filter(
-    (tx) => tx.processingStatus === '按分_家計'
-  );
-
   const byCategory: Record<string, number> = {};
   const byCostType: Record<string, number> = {};
+  const byCostTypeHierarchy: Record<string, CostTypeHierarchy> = {
+    '固定': { total: 0, byMajor: {} },
+    '変動': { total: 0, byMajor: {} },
+  };
   const userShares: Record<number, number> = {};
+  const userTatekae: Record<number, number> = {};
 
-  // Initialize user shares
+  // Initialize user shares and tatekae
   users.forEach((u) => {
     userShares[u.id] = 0;
+    userTatekae[u.id] = 0;
   });
 
-  for (const tx of householdTransactions) {
-    const amount = Math.abs(tx.amount);
+  let householdCount = 0;
+
+  for (const tx of transactions) {
     const category = categories.find((c) => c.id === tx.categoryId);
+    const costType = category?.costType || '変動';
+    const majorName = category?.majorName || '未分類';
+    const minorName = category?.minorName || '未分類';
+
+    // Handle Tatekae (立替) separately
+    if (costType === '立替') {
+      // Find the payer (user with positive share amount)
+      const payer = tx.shares.find((s) => s.amount > 0);
+      if (payer) {
+        userTatekae[payer.userId] = (userTatekae[payer.userId] || 0) + Math.abs(tx.amount);
+      }
+      // Add shares to userShares (except payer's positive amount for tatekae)
+      for (const share of tx.shares) {
+        // Skip positive amounts for tatekae (the payer's side)
+        if (share.amount > 0) continue;
+        userShares[share.userId] = (userShares[share.userId] || 0) + share.amount;
+      }
+      continue;
+    }
+
+    // Skip transfers
+    if (costType === '振替' || tx.processingStatus.startsWith('集計除外')) {
+      continue;
+    }
+
+    // Only include household transactions for main summary
+    if (tx.processingStatus !== '按分_家計') {
+      continue;
+    }
+
+    householdCount++;
+    const amount = Math.abs(tx.amount);
 
     // By major category
-    const majorName = category?.majorName || '未分類';
     byCategory[majorName] = (byCategory[majorName] || 0) + amount;
 
-    // By cost type
-    const costType = category?.costType || '変動';
+    // By cost type (flat)
     byCostType[costType] = (byCostType[costType] || 0) + amount;
+
+    // By cost type hierarchy (3-level)
+    if (costType === '固定' || costType === '変動') {
+      const costGroup = byCostTypeHierarchy[costType];
+      costGroup.total += amount;
+
+      if (!costGroup.byMajor[majorName]) {
+        costGroup.byMajor[majorName] = { total: 0, byMinor: {} };
+      }
+      costGroup.byMajor[majorName].total += amount;
+      costGroup.byMajor[majorName].byMinor[minorName] =
+        (costGroup.byMajor[majorName].byMinor[minorName] || 0) + amount;
+    }
 
     // By user
     for (const share of tx.shares) {
@@ -468,8 +535,10 @@ export function calculateMonthlySummary(
     totalSpending,
     byCategory,
     byCostType,
+    byCostTypeHierarchy,
     userShares,
-    transactionCount: householdTransactions.length,
+    userTatekae,
+    transactionCount: householdCount,
   };
 }
 
