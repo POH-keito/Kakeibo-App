@@ -13,6 +13,7 @@ import {
   type ExclusionRule,
 } from '../lib/ncb.js';
 import { requireAdmin, type AuthUser } from '../middleware/auth.js';
+import { determineProcessingStatus, calculateShares } from '../lib/business-logic.js';
 
 // Validation schemas
 const parseSchema = z.object({
@@ -108,12 +109,18 @@ app.post('/parse', zValidator('json', parseSchema), async (c) => {
     ncb.list<BurdenRatio>('burden_ratios', { where: { household_id: householdId } }),
   ]);
 
-  // Build lookup maps
-  const categoryMap = new Map(
-    categories.map((c) => [`${c.major_name}|${c.minor_name}`, c])
-  );
-  const exclusionCategoryIds = new Set(exclusionRules.map((r) => r.category_id));
-  const aliases = userAliases.filter((ua) => users.some((u) => u.id === ua.user_id));
+  // Build data for business logic
+  const aliasStrings = userAliases
+    .filter((ua) => users.some((u) => u.id === ua.user_id))
+    .map((ua) => ua.alias);
+
+  // Build exclusion rules with category names
+  const exclusionRulesWithNames = exclusionRules
+    .map((rule) => {
+      const cat = categories.find((c) => c.id === rule.category_id);
+      return cat ? { majorName: cat.major_name, minorName: cat.minor_name, id: rule.id } : null;
+    })
+    .filter((r): r is { majorName: string; minorName: string; id: number } => r !== null);
 
   // Skip header
   const transactions: ParsedTransaction[] = [];
@@ -151,50 +158,26 @@ app.post('/parse', zValidator('json', parseSchema), async (c) => {
         ? `${dateParts[0]}-${dateParts[1].padStart(2, '0')}-${dateParts[2].padStart(2, '0')}`
         : date;
 
-    // Determine processing_status (matches old app logic exactly)
-    let processingStatus = '按分_家計';
+    // Determine processing_status using business logic module
+    const statusResult = determineProcessingStatus({
+      isTransfer,
+      isCalculationTarget,
+      memo: memo || null,
+      majorName,
+      minorName,
+      userAliases: aliasStrings,
+      exclusionRules: exclusionRulesWithNames,
+    });
+
+    const processingStatus = statusResult.status;
+    const appliedExclusionRuleId = statusResult.appliedExclusionRuleId ?? null;
+
+    // For 按分_家計, find burden ratio for transaction month
     let appliedBurdenRatioId: number | null = null;
-    let appliedExclusionRuleId: number | null = null;
-
-    if (isTransfer) {
-      processingStatus = '集計除外_振替';
-    } else if (!isCalculationTarget) {
-      processingStatus = '集計除外_計算対象外';
-    } else {
-      const memoText = memo || '';
-      let found = false;
-
-      // Check user aliases
-      for (const userAlias of aliases) {
-        if (memoText.startsWith(userAlias.alias)) {
-          processingStatus = `按分_${userAlias.alias}`;
-          found = true;
-          break;
-        }
-      }
-
-      // Check for 家計
-      if (!found && memoText.startsWith('家計')) {
-        processingStatus = '按分_家計';
-        found = true;
-      }
-
-      // Check exclusion rules
-      if (!found) {
-        const category = categoryMap.get(`${majorName}|${minorName}`);
-        if (category && exclusionCategoryIds.has(category.id)) {
-          processingStatus = '集計除外_項目';
-          const rule = exclusionRules.find((r) => r.category_id === category.id);
-          appliedExclusionRuleId = rule?.id || null;
-        }
-      }
-
-      // For 按分_家計, find burden ratio for transaction month
-      if (processingStatus === '按分_家計') {
-        const yearMonth = isoDate.substring(0, 7); // YYYY-MM
-        const burdenRatio = burdenRatios.find((br) => br.effective_month === yearMonth);
-        appliedBurdenRatioId = burdenRatio?.id || null;
-      }
+    if (processingStatus === '按分_家計') {
+      const yearMonth = isoDate.substring(0, 7); // YYYY-MM
+      const burdenRatio = burdenRatios.find((br) => br.effective_month === yearMonth);
+      appliedBurdenRatioId = burdenRatio?.id || null;
     }
 
     transactions.push({
@@ -343,7 +326,7 @@ app.post('/execute', zValidator('json', executeSchema), async (c) => {
     }
   }
 
-  // Calculate shares for all transactions (matching old app logic)
+  // Calculate shares for all transactions using business logic module
   const txsNeedingShares = transactions.filter(
     (tx) => tx.processing_status.startsWith('按分_')
   );
@@ -356,7 +339,13 @@ app.post('/execute', zValidator('json', executeSchema), async (c) => {
       ncb.list<BurdenRatio>('burden_ratios', { where: { household_id: householdId } }),
     ]);
 
-    const userAliasMap = new Map(userAliases.map((ua) => [ua.alias, ua.user_id]));
+    // Build userAliasMap for business logic (userId -> alias)
+    const userAliasMap = new Map<number, string>();
+    for (const ua of userAliases) {
+      if (users.some((u) => u.id === ua.user_id)) {
+        userAliasMap.set(ua.user_id, ua.alias);
+      }
+    }
 
     // Get burden ratio details for all burden ratios
     const burdenRatioIds = burdenRatios.map((br) => br.id);
@@ -364,69 +353,40 @@ app.post('/execute', zValidator('json', executeSchema), async (c) => {
       where: { burden_ratio_id: { _in: burdenRatioIds } },
     });
 
+    // Build data for business logic
+    const usersForCalc = users.map((u) => ({ id: u.id, name: u.name }));
+    const ratiosForCalc = burdenRatios.map((br) => ({
+      id: br.id,
+      effectiveMonth: br.effective_month,
+    }));
+    const detailsForCalc = burdenRatioDetails.map((d) => ({
+      burdenRatioId: d.burden_ratio_id,
+      userId: d.user_id,
+      ratioPercent: d.ratio_percent,
+    }));
+
     const shares: Partial<TransactionShare>[] = [];
 
     for (const tx of txsNeedingShares) {
-      // Extract alias from processing_status if applicable
-      const match = tx.processing_status.match(/^按分_(.+)$/);
-      if (!match) continue;
+      // Use business logic module for share calculation
+      const result = calculateShares({
+        amount: tx.amount,
+        processingStatus: tx.processing_status,
+        transactionDate: tx.transaction_date,
+        users: usersForCalc,
+        userAliasMap,
+        burdenRatios: ratiosForCalc,
+        burdenRatioDetails: detailsForCalc,
+        // No existing shares or overrides on import - fresh calculation
+      });
 
-      const target = match[1];
-      const amount = tx.amount;
-
-      if (target === '家計') {
-        // Use burden_ratios for the transaction month
-        const yearMonth = tx.transaction_date.substring(0, 7); // YYYY-MM
-        const burdenRatio = burdenRatios.find((br) => br.effective_month === yearMonth);
-
-        if (burdenRatio && users.length === 2) {
-          const details = burdenRatioDetails.filter((d) => d.burden_ratio_id === burdenRatio.id);
-          const user1 = users[0];
-          const user2 = users[1];
-          const user1Detail = details.find((d) => d.user_id === user1.id);
-
-          const user1Percent = user1Detail ? user1Detail.ratio_percent : 50;
-          const user1Share = Math.round(amount * (user1Percent / 100));
-
-          shares.push({
-            moneyforward_id: tx.moneyforward_id,
-            user_id: user1.id,
-            share_amount: user1Share,
-          });
-          shares.push({
-            moneyforward_id: tx.moneyforward_id,
-            user_id: user2.id,
-            share_amount: amount - user1Share,
-          });
-        } else {
-          // Fallback to 50/50
-          const shareAmount = Math.round(amount / users.length);
-          users.forEach((u, index) => {
-            shares.push({
-              moneyforward_id: tx.moneyforward_id,
-              user_id: u.id,
-              share_amount: (index === 0) ? amount - (shareAmount * (users.length - 1)) : shareAmount,
-            });
-          });
-        }
-      } else {
-        // Individual attribution (按分_{alias})
-        const userId = userAliasMap.get(target);
-        if (userId) {
-          shares.push({
-            moneyforward_id: tx.moneyforward_id,
-            user_id: userId,
-            share_amount: amount,
-          });
-          // Set 0 for other users
-          users.filter((u) => u.id !== userId).forEach((u) => {
-            shares.push({
-              moneyforward_id: tx.moneyforward_id,
-              user_id: u.id,
-              share_amount: 0,
-            });
-          });
-        }
+      // Convert result to database format
+      for (const share of result.shares) {
+        shares.push({
+          moneyforward_id: tx.moneyforward_id,
+          user_id: share.userId,
+          share_amount: share.amount,
+        });
       }
     }
 
