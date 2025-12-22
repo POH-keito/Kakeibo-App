@@ -1,9 +1,11 @@
 import { config } from 'dotenv';
 import { resolve } from 'path';
 // Load .env.local from project root (parent of backend workspace)
+// In production, env vars are set directly, so this is a no-op
 config({ path: resolve(process.cwd(), '..', '.env.local') });
 
 import { serve } from '@hono/node-server';
+import { serveStatic } from '@hono/node-server/serve-static';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
@@ -58,6 +60,11 @@ api.route('/shares', sharesRoutes);
 api.route('/import', importRoutes);
 api.route('/tags', tagsRoutes);
 api.route('/burden-ratios', burdenRatiosRoutes);
+
+// Serve static files (frontend build) in production
+// This must come after API routes
+app.use('/*', serveStatic({ root: './public' }));
+app.use('/*', serveStatic({ path: './public/index.html' })); // SPA fallback
 
 // Export type for RPC client
 export type AppType = typeof app;

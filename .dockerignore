@@ -1,0 +1,53 @@
+# Dependencies
+node_modules
+**/node_modules
+
+# Build outputs (will be rebuilt in Docker)
+dist
+**/dist
+frontend/dist
+backend/dist
+
+# Development files
+.env
+.env.local
+.env.*.local
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.code-workspace
+
+# Claude
+.claude
+.claudeignore
+CLAUDE.md
+
+# Documentation
+.docs
+*.md
+!README.md
+
+# Tests
+tests
+test-results
+playwright.config.ts
+playwright-report
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Misc
+*.csv
+*.sql
+*.sqlite
+*.db
