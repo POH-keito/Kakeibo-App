@@ -1,36 +1,51 @@
-import { createFileRoute, redirect } from '@tanstack/react-router';
+import { createFileRoute } from '@tanstack/react-router';
 import { useState, useMemo, useCallback } from 'react';
 import {
   useEnrichedTransactions,
   useUsers,
   useBurdenRatio,
-  useApplyDefaultRatio,
   useSaveOverridesBatch,
   fetchApi,
 } from '../lib/api';
 import type { EnrichedTransaction } from '../lib/types';
 import { TransactionsSkeleton } from '../components/Skeleton';
 
-export const Route = createFileRoute('/transactions')({
-  beforeLoad: async ({ context }) => {
-    const user = await context.queryClient.ensureQueryData({
-      queryKey: ['me'],
-      queryFn: () => fetchApi<{ email: string; role: string }>('/auth/me'),
-    });
-    if (user.role !== 'admin') {
-      throw redirect({ to: '/' });
-    }
+export const Route = createFileRoute('/details')({
+  loader: async ({ context }) => {
+    const now = new Date();
+    const year = now.getFullYear().toString();
+    const month = (now.getMonth() + 1).toString().padStart(2, '0');
+
+    // Prefetch data in parallel
+    await Promise.all([
+      context.queryClient.ensureQueryData({
+        queryKey: ['transactions', year, month, true],
+        queryFn: () => fetchApi(`/transactions?year=${year}&month=${month}&includeTagged=true`),
+      }),
+      context.queryClient.ensureQueryData({
+        queryKey: ['users'],
+        queryFn: () => fetchApi('/master/users'),
+      }),
+      context.queryClient.ensureQueryData({
+        queryKey: ['burden-ratio', year, month],
+        queryFn: () => fetchApi(`/transactions/burden-ratio?year=${year}&month=${month}`),
+      }),
+      context.queryClient.ensureQueryData({
+        queryKey: ['categories'],
+        queryFn: () => fetchApi('/master/categories'),
+      }),
+    ]);
   },
-  component: TransactionsPage,
+  pendingComponent: TransactionsSkeleton,
+  component: DetailsPage,
 });
 
 type SortMode = 'date-status' | 'status-date' | 'status-category' | 'status-category-amount' | 'category' | 'amount';
 
-function TransactionsPage() {
+function DetailsPage() {
   const now = new Date();
   const [year, setYear] = useState(now.getFullYear().toString());
   const [month, setMonth] = useState((now.getMonth() + 1).toString().padStart(2, '0'));
-  const [includeExcluded, setIncludeExcluded] = useState(true);
   const [sortMode, setSortMode] = useState<SortMode>('date-status');
   const [pendingChanges, setPendingChanges] = useState<
     Map<string, { userId: number; percent: number }[]>
@@ -52,11 +67,10 @@ function TransactionsPage() {
       .join(' / ');
   }, [burdenRatio, users]);
 
-  // Filter transactions
+  // Filter out excluded transactions (always)
   const filteredTransactions = useMemo(() => {
-    if (includeExcluded) return transactions;
     return transactions.filter((tx) => !tx.processing_status.startsWith('集計除外'));
-  }, [transactions, includeExcluded]);
+  }, [transactions]);
 
   // Sort/group transactions
   const groupedTransactions = useMemo(() => {
@@ -137,34 +151,8 @@ function TransactionsPage() {
     [pendingChanges]
   );
 
-  // Mutations
-  const applyDefaultRatio = useApplyDefaultRatio();
+  // Mutation
   const saveOverridesBatch = useSaveOverridesBatch();
-
-  // Apply default burden ratio to all transactions
-  const handleApplyDefault = async () => {
-    if (!burdenRatio?.details) return;
-
-    setSaveStatus('saving');
-    try {
-      const householdTransactions = transactions.filter(
-        (tx) => tx.processing_status === '按分_家計'
-      );
-      const moneyforwardIds = householdTransactions.map((tx) => tx.moneyforward_id);
-
-      await applyDefaultRatio.mutateAsync({
-        year,
-        month,
-        moneyforwardIds,
-      });
-
-      setPendingChanges(new Map());
-      setSaveStatus('saved');
-      setTimeout(() => setSaveStatus('idle'), 2000);
-    } catch {
-      setSaveStatus('error');
-    }
-  };
 
   // Save changes
   const handleSaveChanges = async () => {
@@ -206,12 +194,6 @@ function TransactionsPage() {
     { key: 'amount', label: '金額' },
   ];
 
-  // Export CSV
-  const handleExport = () => {
-    const url = `/api/transactions/export?year=${year}&month=${month}`;
-    window.location.href = url;
-  };
-
   return (
     <div className="space-y-4">
       {/* Controls */}
@@ -244,36 +226,9 @@ function TransactionsPage() {
             </select>
           </div>
 
-          <label className="flex items-center gap-2">
-            <input
-              type="checkbox"
-              checked={includeExcluded}
-              onChange={(e) => setIncludeExcluded(e.target.checked)}
-              className="h-4 w-4"
-            />
-            <span className="text-sm">集計除外も表示</span>
-          </label>
-
-          <button
-            onClick={handleExport}
-            className="rounded bg-green-600 px-4 py-2 text-sm text-white hover:bg-green-700"
-          >
-            CSVエクスポート
-          </button>
-
-          {burdenRatio && (
-            <button
-              onClick={handleApplyDefault}
-              disabled={saveStatus === 'saving'}
-              className="ml-auto rounded bg-gray-600 px-4 py-2 text-sm text-white hover:bg-gray-700 disabled:opacity-50"
-            >
-              デフォルト按分を適用
-            </button>
-          )}
-
           {hasPendingChanges && (
             <>
-              <div className="flex items-center gap-2 rounded bg-yellow-50 px-3 py-2">
+              <div className="flex items-center gap-2 rounded bg-yellow-50 px-3 py-2 ml-auto">
                 <span className="text-sm text-yellow-800">
                   {pendingChanges.size}件の変更があります
                 </span>
@@ -383,8 +338,6 @@ function TransactionRow({
               className={`rounded px-2 py-0.5 text-xs ${
                 transaction.processing_status === '按分_家計'
                   ? 'bg-blue-100 text-blue-800'
-                  : transaction.processing_status.startsWith('集計除外')
-                  ? 'bg-gray-100 text-gray-600'
                   : 'bg-green-100 text-green-800'
               }`}
             >

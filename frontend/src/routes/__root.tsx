@@ -74,7 +74,7 @@ function RootLayoutInner() {
           <div className="flex items-center justify-between">
             <h1 className="text-xl font-bold text-gray-900">Kakeibo App</h1>
             <div className="text-sm text-gray-600">
-              {me?.email} ({me?.role})
+              {me?.email} ({me?.role === 'admin' ? 'admin' : 'user'})
             </div>
           </div>
         </div>
@@ -84,9 +84,10 @@ function RootLayoutInner() {
       <nav className="bg-white border-b">
         <div className="mx-auto max-w-7xl px-4">
           <div className="flex gap-6 overflow-x-auto py-3">
-            {/* Viewer accessible routes */}
+            {/* User accessible routes */}
             <NavLink to="/">ダッシュボード</NavLink>
             <NavLink to="/comparison">月次比較</NavLink>
+            <NavLink to="/details">明細</NavLink>
             <NavLink to="/tags">タグ集計</NavLink>
             <NavLink to="/ai">AI分析</NavLink>
 
@@ -94,7 +95,7 @@ function RootLayoutInner() {
             {isAdmin && (
               <>
                 <div className="border-l border-gray-300" />
-                <NavLink to="/transactions">取引詳細</NavLink>
+                <NavLink to="/transactions">取引管理</NavLink>
                 <NavLink to="/import">CSVインポート</NavLink>
                 <NavLink to="/settings">設定</NavLink>
               </>

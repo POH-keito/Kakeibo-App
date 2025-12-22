@@ -13,6 +13,7 @@ import { Route as TransactionsRouteImport } from './routes/transactions'
 import { Route as TagsRouteImport } from './routes/tags'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ImportRouteImport } from './routes/import'
+import { Route as DetailsRouteImport } from './routes/details'
 import { Route as ComparisonRouteImport } from './routes/comparison'
 import { Route as AiRouteImport } from './routes/ai'
 import { Route as IndexRouteImport } from './routes/index'
@@ -37,6 +38,11 @@ const ImportRoute = ImportRouteImport.update({
   path: '/import',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DetailsRoute = DetailsRouteImport.update({
+  id: '/details',
+  path: '/details',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ComparisonRoute = ComparisonRouteImport.update({
   id: '/comparison',
   path: '/comparison',
@@ -57,6 +63,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/ai': typeof AiRoute
   '/comparison': typeof ComparisonRoute
+  '/details': typeof DetailsRoute
   '/import': typeof ImportRoute
   '/settings': typeof SettingsRoute
   '/tags': typeof TagsRoute
@@ -66,6 +73,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/ai': typeof AiRoute
   '/comparison': typeof ComparisonRoute
+  '/details': typeof DetailsRoute
   '/import': typeof ImportRoute
   '/settings': typeof SettingsRoute
   '/tags': typeof TagsRoute
@@ -76,6 +84,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/ai': typeof AiRoute
   '/comparison': typeof ComparisonRoute
+  '/details': typeof DetailsRoute
   '/import': typeof ImportRoute
   '/settings': typeof SettingsRoute
   '/tags': typeof TagsRoute
@@ -87,6 +96,7 @@ export interface FileRouteTypes {
     | '/'
     | '/ai'
     | '/comparison'
+    | '/details'
     | '/import'
     | '/settings'
     | '/tags'
@@ -96,6 +106,7 @@ export interface FileRouteTypes {
     | '/'
     | '/ai'
     | '/comparison'
+    | '/details'
     | '/import'
     | '/settings'
     | '/tags'
@@ -105,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/ai'
     | '/comparison'
+    | '/details'
     | '/import'
     | '/settings'
     | '/tags'
@@ -115,6 +127,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AiRoute: typeof AiRoute
   ComparisonRoute: typeof ComparisonRoute
+  DetailsRoute: typeof DetailsRoute
   ImportRoute: typeof ImportRoute
   SettingsRoute: typeof SettingsRoute
   TagsRoute: typeof TagsRoute
@@ -151,6 +164,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ImportRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/details': {
+      id: '/details'
+      path: '/details'
+      fullPath: '/details'
+      preLoaderRoute: typeof DetailsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/comparison': {
       id: '/comparison'
       path: '/comparison'
@@ -179,6 +199,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AiRoute: AiRoute,
   ComparisonRoute: ComparisonRoute,
+  DetailsRoute: DetailsRoute,
   ImportRoute: ImportRoute,
   SettingsRoute: SettingsRoute,
   TagsRoute: TagsRoute,
