@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
+import { zValidator } from '@hono/zod-validator';
 import {
   ncb,
   parallelBatchFetch,
@@ -12,6 +14,13 @@ import {
 } from '../lib/ncb.js';
 import type { AuthUser } from '../middleware/auth.js';
 
+// Validation schemas
+const yearMonthQuerySchema = z.object({
+  year: z.string().regex(/^\d{4}$/).optional(),
+  month: z.string().regex(/^(0[1-9]|1[0-2])$/).optional(),
+  includeTagged: z.enum(['true', 'false']).optional(),
+});
+
 const app = new Hono<{
   Variables: {
     user: AuthUser;
@@ -22,13 +31,14 @@ const app = new Hono<{
  * GET /api/transactions
  * Query params: year, month, includeTagged
  */
-app.get('/', async (c) => {
+app.get('/', zValidator('query', yearMonthQuerySchema), async (c) => {
   const user = c.get('user');
   const householdId = user.householdId;
+  const query = c.req.valid('query');
 
-  const year = c.req.query('year') || new Date().getFullYear().toString();
-  const month = c.req.query('month') || (new Date().getMonth() + 1).toString().padStart(2, '0');
-  const includeTagged = c.req.query('includeTagged') === 'true';
+  const year = query.year || new Date().getFullYear().toString();
+  const month = query.month || (new Date().getMonth() + 1).toString().padStart(2, '0');
+  const includeTagged = query.includeTagged === 'true';
 
   const firstDay = `${year}-${month}-01`;
   const nextMonth = parseInt(month) === 12 ? 1 : parseInt(month) + 1;
