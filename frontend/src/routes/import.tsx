@@ -1,8 +1,17 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { useState, useCallback, useMemo } from 'react';
-import { useImportParse, useImportCategories, useImportExecute } from '../lib/api';
+import { useImportParse, useImportCategories, useImportExecute, fetchApi } from '../lib/api';
 
 export const Route = createFileRoute('/import')({
+  beforeLoad: async ({ context }) => {
+    const user = await context.queryClient.ensureQueryData({
+      queryKey: ['me'],
+      queryFn: () => fetchApi<{ email: string; role: string }>('/auth/me'),
+    });
+    if (user.role !== 'admin') {
+      throw redirect({ to: '/' });
+    }
+  },
   component: ImportPage,
 });
 

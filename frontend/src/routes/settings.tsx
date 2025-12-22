@@ -1,4 +1,4 @@
-import { createFileRoute } from '@tanstack/react-router';
+import { createFileRoute, redirect } from '@tanstack/react-router';
 import { useState, useCallback } from 'react';
 import {
   useTags,
@@ -11,10 +11,20 @@ import {
   useDeleteBurdenRatio,
   useUsers,
   useAssignTags,
+  fetchApi,
 } from '../lib/api';
 import type { Tag, BurdenRatio } from '../lib/types';
 
 export const Route = createFileRoute('/settings')({
+  beforeLoad: async ({ context }) => {
+    const user = await context.queryClient.ensureQueryData({
+      queryKey: ['me'],
+      queryFn: () => fetchApi<{ email: string; role: string }>('/auth/me'),
+    });
+    if (user.role !== 'admin') {
+      throw redirect({ to: '/' });
+    }
+  },
   component: SettingsPage,
 });
 
