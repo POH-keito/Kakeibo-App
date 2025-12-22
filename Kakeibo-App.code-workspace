@@ -1,0 +1,13 @@
+{
+  "folders": [
+    {
+      "path": ".",
+    },
+    {
+      "path": "../Kakeibo-Batch-Processor",
+    },
+    {
+      "path": "../Kakeibo-Dashboarding",
+    },
+  ],
+}
