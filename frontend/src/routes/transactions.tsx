@@ -11,6 +11,11 @@ import {
 import type { EnrichedTransaction } from '../lib/types';
 import { TransactionsSkeleton } from '../components/Skeleton';
 
+// Format date string to YYYY-MM-DD
+function formatDate(dateStr: string): string {
+  return dateStr.split('T')[0];
+}
+
 export const Route = createFileRoute('/transactions')({
   beforeLoad: async ({ context }) => {
     const user = await context.queryClient.ensureQueryData({
@@ -377,7 +382,7 @@ function TransactionRow({
       <div className="flex items-start justify-between">
         <div className="flex-1">
           <div className="flex items-center gap-3">
-            <span className="font-medium">{transaction.transaction_date}</span>
+            <span className="font-medium">{formatDate(transaction.transaction_date)}</span>
             <span className="text-sm text-gray-600">{transaction.content}</span>
             <span
               className={`rounded px-2 py-0.5 text-xs ${
