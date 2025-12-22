@@ -316,23 +316,37 @@ function TransactionsPage() {
         ))}
       </div>
 
-      {/* Transaction list */}
+      {/* Transaction table */}
       {isLoading ? (
         <TransactionsSkeleton />
       ) : (
-        <div className="space-y-2">
-          {groupedTransactions.map((tx) => (
-            <TransactionRow
-              key={tx.moneyforward_id}
-              transaction={tx}
-              users={users}
-              currentShares={getCurrentShares(tx)}
-              onUpdateShares={(shares) => updateShares(tx.moneyforward_id, shares)}
-            />
-          ))}
+        <div className="rounded-lg bg-white shadow overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-gray-50 border-b">
+              <tr>
+                <th className="px-4 py-3 text-left font-medium text-gray-700 w-28">日付</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700 w-28">ステータス</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700">内容</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700 w-48">カテゴリ</th>
+                <th className="px-4 py-3 text-right font-medium text-gray-700 w-28">金額</th>
+                <th className="px-4 py-3 text-left font-medium text-gray-700 w-56">負担割合</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y">
+              {groupedTransactions.map((tx) => (
+                <TransactionRow
+                  key={tx.moneyforward_id}
+                  transaction={tx}
+                  users={users}
+                  currentShares={getCurrentShares(tx)}
+                  onUpdateShares={(shares) => updateShares(tx.moneyforward_id, shares)}
+                />
+              ))}
+            </tbody>
+          </table>
 
           {groupedTransactions.length === 0 && (
-            <div className="rounded-lg bg-white p-8 text-center text-gray-500">
+            <div className="p-8 text-center text-gray-500">
               取引がありません
             </div>
           )}
@@ -370,172 +384,146 @@ function TransactionRow({
     setIsEditing(false);
   };
 
-  const updatePercent = (userId: number, value: string) => {
-    const percent = parseFloat(value) || 0;
-    setEditShares((prev) =>
-      prev.map((s) => (s.userId === userId ? { ...s, percent } : s))
-    );
-  };
+  const isHousehold = transaction.processing_status === '按分_家計';
+  const isExcluded = transaction.processing_status.startsWith('集計除外');
 
   return (
-    <div className="rounded-lg bg-white p-4 shadow">
-      <div className="flex items-start justify-between">
-        <div className="flex-1">
-          <div className="flex items-center gap-3">
-            <span className="font-medium">{formatDate(transaction.transaction_date)}</span>
-            <span className="text-sm text-gray-600">{transaction.content}</span>
-            <span
-              className={`rounded px-2 py-0.5 text-xs ${
-                transaction.processing_status === '按分_家計'
-                  ? 'bg-blue-100 text-blue-800'
-                  : transaction.processing_status.startsWith('集計除外')
-                  ? 'bg-gray-100 text-gray-600'
-                  : 'bg-green-100 text-green-800'
-              }`}
-            >
-              {transaction.processing_status}
-            </span>
-          </div>
-          <div className="mt-1 flex items-center gap-3 text-sm text-gray-600">
-            <span>
-              {transaction.categoryMajorName}
-              {transaction.categoryMinorName && ` / ${transaction.categoryMinorName}`}
-            </span>
-            {transaction.costType && (
-              <span className="text-xs text-gray-500">[{transaction.costType}]</span>
-            )}
-          </div>
-        </div>
+    <tr className={`hover:bg-gray-50 ${isExcluded ? 'text-gray-400' : ''}`}>
+      <td className="px-4 py-3 whitespace-nowrap">
+        {formatDate(transaction.transaction_date)}
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap">
+        <span
+          className={`rounded px-1.5 py-0.5 text-xs ${
+            isHousehold
+              ? 'bg-blue-100 text-blue-800'
+              : isExcluded
+              ? 'bg-gray-100 text-gray-600'
+              : 'bg-green-100 text-green-800'
+          }`}
+        >
+          {transaction.processing_status}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <span className="truncate max-w-md block">{transaction.content}</span>
+      </td>
+      <td className="px-4 py-3 whitespace-nowrap">
+        {transaction.categoryMajorName}
+        {transaction.categoryMinorName && (
+          <span className="text-gray-400"> / {transaction.categoryMinorName}</span>
+        )}
+      </td>
+      <td className="px-4 py-3 text-right font-medium whitespace-nowrap">
+        ¥{Math.abs(transaction.amount).toLocaleString()}
+      </td>
+      <td className="px-4 py-3">
+        {isHousehold && (
+          <BurdenRatioCell
+            transaction={transaction}
+            users={users}
+            currentShares={currentShares}
+            isEditing={isEditing}
+            editShares={editShares}
+            setEditShares={setEditShares}
+            onEditStart={handleEditStart}
+            onEditCancel={handleEditCancel}
+            onEditSave={handleEditSave}
+          />
+        )}
+      </td>
+    </tr>
+  );
+}
 
-        <div className="text-right">
-          <div className="text-lg font-semibold">¥{Math.abs(transaction.amount).toLocaleString()}</div>
-          {transaction.hasOverrides && (
-            <span className="text-xs text-orange-600">※カスタム按分</span>
-          )}
+function BurdenRatioCell({
+  transaction,
+  users,
+  currentShares,
+  isEditing,
+  editShares,
+  setEditShares,
+  onEditStart,
+  onEditCancel,
+  onEditSave,
+}: {
+  transaction: EnrichedTransaction;
+  users: { id: number; name: string; aliases: string[] }[];
+  currentShares: { userId: number; percent: number }[];
+  isEditing: boolean;
+  editShares: { userId: number; percent: number }[];
+  setEditShares: React.Dispatch<React.SetStateAction<{ userId: number; percent: number }[]>>;
+  onEditStart: () => void;
+  onEditCancel: () => void;
+  onEditSave: () => void;
+}) {
+  if (!isEditing) {
+    return (
+      <div className="flex items-center gap-2">
+        <div className={`flex gap-3 rounded px-2 py-1 text-xs ${
+          transaction.hasOverrides
+            ? 'bg-orange-50 border border-orange-200'
+            : 'bg-green-50 border border-green-200'
+        }`}>
+          {currentShares.map((share) => {
+            const user = users.find((u) => u.id === share.userId);
+            const alias = user?.aliases[0] || user?.name || '?';
+            return (
+              <span key={share.userId}>
+                <span className="font-medium">{alias}:</span> {share.percent.toFixed(0)}%
+              </span>
+            );
+          })}
+        </div>
+        <button
+          onClick={onEditStart}
+          className="text-xs text-blue-600 hover:text-blue-800 whitespace-nowrap"
+        >
+          編集
+        </button>
+      </div>
+    );
+  }
+
+  // Editing mode
+  if (users.length === 2) {
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-xs w-12">{users[0]?.aliases[0] || users[0]?.name}:</span>
+          <input
+            type="range"
+            min="0"
+            max="100"
+            step="1"
+            value={editShares[0]?.percent || 0}
+            onChange={(e) => {
+              const p1 = parseFloat(e.target.value);
+              setEditShares([
+                { userId: users[0].id, percent: p1 },
+                { userId: users[1].id, percent: 100 - p1 },
+              ]);
+            }}
+            className="flex-1 h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer"
+          />
+          <span className="text-xs w-10">{editShares[0]?.percent?.toFixed(0)}%</span>
+        </div>
+        <div className="flex items-center gap-2 text-gray-500">
+          <span className="text-xs w-12">{users[1]?.aliases[0] || users[1]?.name}:</span>
+          <div className="flex-1" />
+          <span className="text-xs w-10">{editShares[1]?.percent?.toFixed(0)}%</span>
+        </div>
+        <div className="flex justify-end gap-1">
+          <button onClick={onEditCancel} className="rounded border px-2 py-0.5 text-xs hover:bg-gray-50">
+            取消
+          </button>
+          <button onClick={onEditSave} className="rounded bg-blue-600 px-2 py-0.5 text-xs text-white hover:bg-blue-700">
+            OK
+          </button>
         </div>
       </div>
+    );
+  }
 
-      {/* Share breakdown */}
-      {transaction.processing_status === '按分_家計' && (
-        <div className="mt-3 border-t pt-3">
-          {!isEditing ? (
-            <div className="flex items-center justify-between">
-              <div className={`flex gap-4 rounded px-2 py-1 ${
-                transaction.hasOverrides
-                  ? 'bg-orange-50 border border-orange-200'
-                  : 'bg-green-50 border border-green-200'
-              }`}>
-                {currentShares.map((share) => {
-                  const user = users.find((u) => u.id === share.userId);
-                  const alias = user?.aliases[0] || user?.name || `User ${share.userId}`;
-                  return (
-                    <div key={share.userId} className="text-sm">
-                      <span className="font-medium">{alias}:</span>{' '}
-                      <span className="text-gray-700">{share.percent.toFixed(1)}%</span>
-                    </div>
-                  );
-                })}
-              </div>
-              <button
-                onClick={handleEditStart}
-                className="text-sm text-blue-600 hover:text-blue-800"
-              >
-                按分を編集
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {users.length === 2 && (
-                <>
-                  {/* Slider for first user */}
-                  <div className="flex items-center gap-4">
-                    <span className="w-20 text-sm font-medium">
-                      {users[0]?.aliases[0] || users[0]?.name || `User ${editShares[0]?.userId}`}:
-                    </span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="1"
-                      value={editShares[0]?.percent || 0}
-                      onChange={(e) => {
-                        const user1Percent = parseFloat(e.target.value);
-                        const user2Percent = 100 - user1Percent;
-                        setEditShares([
-                          { userId: users[0].id, percent: user1Percent },
-                          { userId: users[1].id, percent: user2Percent },
-                        ]);
-                      }}
-                      className="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider-thumb"
-                    />
-                    <span className="w-16 text-sm">{editShares[0]?.percent?.toFixed(0)}%</span>
-                  </div>
-
-                  {/* Display second user (auto-calculated) */}
-                  <div className="flex items-center gap-4 text-gray-600">
-                    <span className="w-20 text-sm">
-                      {users[1]?.aliases[0] || users[1]?.name || `User ${editShares[1]?.userId}`}:
-                    </span>
-                    <div className="flex-1 h-2 bg-gray-100 rounded-lg" />
-                    <span className="w-16 text-sm">{editShares[1]?.percent?.toFixed(0)}%</span>
-                  </div>
-
-                  {/* Amount preview */}
-                  <div className="flex justify-between text-sm text-gray-600 px-2">
-                    <span>
-                      {users[0]?.aliases[0] || users[0]?.name}:
-                      ¥{Math.round(Math.abs(transaction.amount) * (editShares[0]?.percent || 0) / 100).toLocaleString()}
-                    </span>
-                    <span>
-                      {users[1]?.aliases[0] || users[1]?.name}:
-                      ¥{Math.round(Math.abs(transaction.amount) * (editShares[1]?.percent || 0) / 100).toLocaleString()}
-                    </span>
-                  </div>
-                </>
-              )}
-
-              {/* Fallback for more than 2 users */}
-              {users.length !== 2 && (
-                <div className="flex flex-wrap gap-4">
-                  {editShares.map((share) => {
-                    const user = users.find((u) => u.id === share.userId);
-                    const alias = user?.aliases[0] || user?.name || `User ${share.userId}`;
-                    return (
-                      <div key={share.userId} className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{alias}:</span>
-                        <input
-                          type="number"
-                          value={share.percent}
-                          onChange={(e) => updatePercent(share.userId, e.target.value)}
-                          className="w-20 rounded border px-2 py-1 text-sm"
-                          step="0.1"
-                        />
-                        <span className="text-sm">%</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Buttons */}
-              <div className="flex justify-end gap-2">
-                <button
-                  onClick={handleEditCancel}
-                  className="rounded border px-3 py-1 text-sm hover:bg-gray-50"
-                >
-                  キャンセル
-                </button>
-                <button
-                  onClick={handleEditSave}
-                  className="rounded bg-blue-600 px-3 py-1 text-sm text-white hover:bg-blue-700"
-                >
-                  OK
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
+  return null;
 }
