@@ -13,6 +13,7 @@ import type {
   EnrichedTransaction,
   ChatMessage,
   AIAnalysisResponse,
+  CostTrendData,
 } from './types';
 
 const API_BASE = '/api';
@@ -166,6 +167,15 @@ export function useMonthlySummary(year: string, month: string, includeTagged = f
       fetchApi<MonthlySummary>(
         `/transactions/summary?year=${year}&month=${month}&includeTagged=${includeTagged}`
       ),
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
+  });
+}
+
+export function useCostTrend(months = 6) {
+  return useQuery({
+    queryKey: ['cost-trend', months],
+    queryFn: () => fetchApi<CostTrendData[]>(`/transactions/cost-trend?months=${months}`),
     staleTime: 5 * 60 * 1000,  // 5 minutes
     gcTime: 30 * 60 * 1000,    // 30 minutes
   });

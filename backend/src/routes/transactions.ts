@@ -286,6 +286,87 @@ app.get('/summary', async (c) => {
 });
 
 /**
+ * GET /api/transactions/cost-trend
+ * Get cost type trends over multiple months
+ * Query params: months (default: 6)
+ */
+app.get('/cost-trend', async (c) => {
+  const monthsParam = c.req.query('months') || '6';
+  const months = parseInt(monthsParam);
+
+  const now = new Date();
+  const trends: Array<{
+    month: string;
+    固定費: number;
+    変動費: number;
+    その他: number;
+  }> = [];
+
+  // Fetch all categories once
+  const categories = await ncb.list<Category>('categories', {
+    where: { household_id: HOUSEHOLD_ID },
+  });
+  const categoryMap = new Map(categories.map((c) => [c.id, c]));
+
+  // Generate months array (current month + previous months)
+  for (let i = 0; i < months; i++) {
+    const targetDate = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const year = targetDate.getFullYear();
+    const month = targetDate.getMonth() + 1;
+    const monthStr = `${year}-${String(month).padStart(2, '0')}`;
+
+    const firstDay = `${year}-${String(month).padStart(2, '0')}-01`;
+    const nextMonth = month === 12 ? 1 : month + 1;
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextMonthFirstDay = `${nextYear}-${String(nextMonth).padStart(2, '0')}-01`;
+
+    // Fetch transactions for the month
+    const rawTransactions = await ncb.list<Transaction>('transactions', {
+      where: {
+        household_id: HOUSEHOLD_ID,
+        transaction_date: { _gte: firstDay },
+      },
+      limit: 1000,
+    });
+
+    const transactions = rawTransactions.filter(
+      (tx) =>
+        tx.transaction_date >= firstDay &&
+        tx.transaction_date < nextMonthFirstDay &&
+        tx.processing_status === '按分_家計'
+    );
+
+    // Calculate cost type totals
+    const costTypes: Record<string, number> = {
+      '固定費': 0,
+      '変動費': 0,
+      'その他': 0,
+    };
+
+    transactions.forEach((tx) => {
+      const category = categoryMap.get(tx.category_id || 0);
+      const costType = category?.cost_type || 'その他';
+      const amount = Math.abs(tx.amount);
+
+      if (costType === '固定費' || costType === '変動費') {
+        costTypes[costType] += amount;
+      } else {
+        costTypes['その他'] += amount;
+      }
+    });
+
+    trends.unshift({
+      month: monthStr,
+      固定費: costTypes['固定費'],
+      変動費: costTypes['変動費'],
+      その他: costTypes['その他'],
+    });
+  }
+
+  return c.json(trends);
+});
+
+/**
  * GET /api/transactions/export
  * Export transactions as CSV (UTF-8 with BOM for Excel compatibility)
  */
