@@ -163,6 +163,38 @@ function DashboardPage() {
             {/* Category Summary */}
             <div className="rounded-lg bg-white p-6 shadow">
               <h3 className="mb-4 text-lg font-semibold">カテゴリ別支出</h3>
+
+              {/* Pie Chart */}
+              {pieChartData.length > 0 && (
+                <div className="mb-6 h-80">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <PieChart>
+                      <Pie
+                        data={pieChartData}
+                        dataKey="value"
+                        nameKey="name"
+                        cx="50%"
+                        cy="50%"
+                        outerRadius={80}
+                        label={(entry: { value: number }) => `¥${entry.value.toLocaleString()}`}
+                        labelLine={true}
+                      >
+                        {pieChartData.map((_, index: number) => (
+                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
+                        ))}
+                      </Pie>
+                      <Tooltip
+                        formatter={(value: number | undefined) =>
+                          value !== undefined ? `¥${value.toLocaleString()}` : ''
+                        }
+                      />
+                      <Legend />
+                    </PieChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+
+              {/* List View */}
               <div className="space-y-2">
                 {Object.entries(categorySummary)
                   .sort(([, a], [, b]) => b.amount - a.amount)
