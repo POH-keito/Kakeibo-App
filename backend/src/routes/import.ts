@@ -1,4 +1,6 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
+import { zValidator } from '@hono/zod-validator';
 import {
   ncb,
   type Transaction,
@@ -11,6 +13,41 @@ import {
   type ExclusionRule,
 } from '../lib/ncb.js';
 import { requireAdmin, type AuthUser } from '../middleware/auth.js';
+
+// Validation schemas
+const parseSchema = z.object({
+  csvData: z.string().min(1),
+});
+
+const categorySchema = z.object({
+  major_name: z.string().min(1),
+  minor_name: z.string().min(1),
+  cost_type: z.enum(['固定', '変動']),
+});
+
+const categoriesSchema = z.object({
+  categories: z.array(categorySchema).min(1),
+});
+
+const parsedTransactionSchema = z.object({
+  moneyforward_id: z.string().min(1),
+  transaction_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  content: z.string(),
+  amount: z.number(),
+  major_name: z.string(),
+  minor_name: z.string(),
+  memo: z.string().nullable(),
+  financial_institution: z.string(),
+  is_calculation_target: z.boolean(),
+  is_transfer: z.boolean(),
+  processing_status: z.string(),
+  applied_burden_ratio_id: z.number().nullable(),
+  applied_exclusion_rule_id: z.number().nullable(),
+});
+
+const executeSchema = z.object({
+  transactions: z.array(parsedTransactionSchema).min(1),
+});
 
 const app = new Hono<{
   Variables: {
@@ -49,9 +86,8 @@ interface ImportResult {
  * POST /api/import/parse
  * Parse CSV data and return preview
  */
-app.post('/parse', async (c) => {
-  const body = await c.req.json<{ csvData: string }>();
-  const { csvData } = body;
+app.post('/parse', zValidator('json', parseSchema), async (c) => {
+  const { csvData } = c.req.valid('json');
 
   // Parse CSV (MoneyForward format)
   const lines = csvData.split('\n').filter((line) => line.trim());
@@ -224,15 +260,12 @@ app.post('/parse', async (c) => {
  * POST /api/import/categories
  * Create new categories
  */
-app.post('/categories', async (c) => {
+app.post('/categories', zValidator('json', categoriesSchema), async (c) => {
   const user = c.get('user');
   const householdId = user.householdId;
+  const { categories: cats } = c.req.valid('json');
 
-  const body = await c.req.json<{
-    categories: { major_name: string; minor_name: string; cost_type: string }[];
-  }>();
-
-  const categoriesToCreate = body.categories.map((cat) => ({
+  const categoriesToCreate = cats.map((cat) => ({
     household_id: householdId,
     major_name: cat.major_name,
     minor_name: cat.minor_name,
@@ -248,12 +281,10 @@ app.post('/categories', async (c) => {
  * POST /api/import/execute
  * Execute the import
  */
-app.post('/execute', async (c) => {
+app.post('/execute', zValidator('json', executeSchema), async (c) => {
   const user = c.get('user');
   const householdId = user.householdId;
-
-  const body = await c.req.json<{ transactions: ParsedTransaction[] }>();
-  const { transactions } = body;
+  const { transactions } = c.req.valid('json');
 
   // Get categories
   const categories = await ncb.list<Category>('categories', {

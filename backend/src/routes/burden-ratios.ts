@@ -1,6 +1,27 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
+import { zValidator } from '@hono/zod-validator';
 import { ncb, type BurdenRatio, type BurdenRatioDetail } from '../lib/ncb.js';
 import type { AuthUser } from '../middleware/auth.js';
+
+// Validation schemas
+const ratioDetailSchema = z.object({
+  user_id: z.number().int().positive(),
+  ratio_percent: z.number().min(0).max(100),
+});
+
+const createRatioSchema = z.object({
+  effective_month: z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/),
+  details: z.array(ratioDetailSchema).min(1),
+});
+
+const updateRatioSchema = z.object({
+  details: z.array(ratioDetailSchema).min(1),
+});
+
+const idParamSchema = z.object({
+  id: z.string().regex(/^\d+$/),
+});
 
 const app = new Hono<{
   Variables: {
@@ -55,14 +76,10 @@ app.get('/', async (c) => {
  * Create a new burden ratio with details
  * Body: { effective_month: string, details: Array<{ user_id: number, ratio_percent: number }> }
  */
-app.post('/', async (c) => {
+app.post('/', zValidator('json', createRatioSchema), async (c) => {
   const user = c.get('user');
   const householdId = user.householdId;
-
-  const body = await c.req.json<{
-    effective_month: string;
-    details: Array<{ user_id: number; ratio_percent: number }>;
-  }>();
+  const body = c.req.valid('json');
 
   // Validate total equals 100%
   const total = body.details.reduce((sum, d) => sum + d.ratio_percent, 0);
@@ -111,14 +128,12 @@ app.post('/', async (c) => {
  * Update burden ratio details
  * Body: { details: Array<{ user_id: number, ratio_percent: number }> }
  */
-app.put('/:id', async (c) => {
+app.put('/:id', zValidator('param', idParamSchema), zValidator('json', updateRatioSchema), async (c) => {
   const user = c.get('user');
   const householdId = user.householdId;
-  const id = parseInt(c.req.param('id'));
-
-  const body = await c.req.json<{
-    details: Array<{ user_id: number; ratio_percent: number }>;
-  }>();
+  const { id: idStr } = c.req.valid('param');
+  const id = parseInt(idStr);
+  const body = c.req.valid('json');
 
   // Validate total equals 100%
   const total = body.details.reduce((sum, d) => sum + d.ratio_percent, 0);
@@ -162,10 +177,11 @@ app.put('/:id', async (c) => {
  * DELETE /api/burden-ratios/:id
  * Delete burden ratio and its details
  */
-app.delete('/:id', async (c) => {
+app.delete('/:id', zValidator('param', idParamSchema), async (c) => {
   const user = c.get('user');
   const householdId = user.householdId;
-  const id = parseInt(c.req.param('id'));
+  const { id: idStr } = c.req.valid('param');
+  const id = parseInt(idStr);
 
   // Verify ratio belongs to household
   const ratios = await ncb.list<BurdenRatio>('burden_ratios', {
