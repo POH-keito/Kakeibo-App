@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useMemo } from 'react';
-import { useTags, useTransactions, useTransactionTags, useCategories, useAssignTags, useUnassignTags } from '../lib/api';
+import { useTags, useTransactions, useTransactionTags, useCategories, useAssignTags, useUnassignTags, useCreateTag, useUpdateTag, useDeleteTag } from '../lib/api';
 import { CalendarView, DayTransactionModal } from '../components/CalendarView';
 import type { Transaction } from '../lib/types';
 
@@ -8,7 +8,7 @@ export const Route = createFileRoute('/tags')({
   component: TagsPage,
 });
 
-type ViewMode = 'summary' | 'calendar' | 'bulk';
+type ViewMode = 'summary' | 'calendar' | 'bulk' | 'manage';
 
 function TagsPage() {
   const now = new Date();
@@ -26,7 +26,13 @@ function TagsPage() {
   const [bulkResult, setBulkResult] = useState<{ success: number; error: string | null } | null>(null);
   const [bulkLoading, setBulkLoading] = useState(false);
 
-  const { data: tags = [] } = useTags();
+  // Tag management state
+  const [newTagName, setNewTagName] = useState('');
+  const [editingTagId, setEditingTagId] = useState<number | null>(null);
+  const [editingTagName, setEditingTagName] = useState('');
+  const [deleteConfirmId, setDeleteConfirmId] = useState<number | null>(null);
+
+  const { data: tags = [], refetch: refetchTagsList } = useTags();
   const { data: transactions = [], isLoading } = useTransactions(year, month, true);
   const { data: categories = [] } = useCategories();
 
@@ -36,6 +42,9 @@ function TagsPage() {
   // Mutations
   const assignTags = useAssignTags();
   const unassignTags = useUnassignTags();
+  const createTag = useCreateTag();
+  const updateTag = useUpdateTag();
+  const deleteTag = useDeleteTag();
 
   // Group transactions by tag
   const tagSummary = useMemo(() => {
@@ -155,6 +164,50 @@ function TagsPage() {
     }
   };
 
+  // Tag management handlers
+  const handleCreateTag = async () => {
+    if (!newTagName.trim()) return;
+    try {
+      await createTag.mutateAsync({ name: newTagName.trim() });
+      setNewTagName('');
+      refetchTagsList();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'タグの作成に失敗しました');
+    }
+  };
+
+  const handleUpdateTag = async (id: number) => {
+    if (!editingTagName.trim()) return;
+    try {
+      await updateTag.mutateAsync({ id, name: editingTagName.trim() });
+      setEditingTagId(null);
+      setEditingTagName('');
+      refetchTagsList();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'タグの更新に失敗しました');
+    }
+  };
+
+  const handleDeleteTag = async (id: number) => {
+    try {
+      await deleteTag.mutateAsync(id);
+      setDeleteConfirmId(null);
+      refetchTagsList();
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'タグの削除に失敗しました');
+    }
+  };
+
+  const startEditing = (tag: { id: number; name: string }) => {
+    setEditingTagId(tag.id);
+    setEditingTagName(tag.name);
+  };
+
+  const cancelEditing = () => {
+    setEditingTagId(null);
+    setEditingTagName('');
+  };
+
   const years = Array.from({ length: 3 }, (_, i) => (now.getFullYear() - i).toString());
   const months = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'));
 
@@ -216,6 +269,16 @@ function TagsPage() {
             }`}
           >
             一括タグ付け
+          </button>
+          <button
+            onClick={() => setViewMode('manage')}
+            className={`rounded px-4 py-2 text-sm font-medium transition-colors ${
+              viewMode === 'manage'
+                ? 'bg-white text-gray-900 shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            タグの編集
           </button>
         </div>
       </div>
@@ -293,6 +356,111 @@ function TagsPage() {
                 </div>
               )}
             </div>
+          </div>
+        </div>
+      ) : viewMode === 'manage' ? (
+        <div className="rounded-lg bg-white p-6 shadow">
+          <h3 className="mb-4 text-lg font-semibold text-gray-900">タグの編集</h3>
+
+          {/* New tag form */}
+          <div className="mb-6 flex gap-2">
+            <input
+              type="text"
+              value={newTagName}
+              onChange={(e) => setNewTagName(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleCreateTag()}
+              placeholder="新しいタグ名を入力..."
+              className="flex-1 rounded border px-3 py-2"
+            />
+            <button
+              onClick={handleCreateTag}
+              disabled={!newTagName.trim() || createTag.isPending}
+              className="rounded bg-blue-600 px-4 py-2 font-medium text-white transition-colors hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+            >
+              {createTag.isPending ? '作成中...' : '作成'}
+            </button>
+          </div>
+
+          {/* Tag list */}
+          <div className="space-y-2">
+            {tags.length === 0 ? (
+              <p className="text-center text-gray-500 py-4">タグがありません</p>
+            ) : (
+              tags.map((tag) => (
+                <div
+                  key={tag.id}
+                  className="flex items-center gap-3 rounded border p-3 hover:bg-gray-50"
+                >
+                  {editingTagId === tag.id ? (
+                    <>
+                      <input
+                        type="text"
+                        value={editingTagName}
+                        onChange={(e) => setEditingTagName(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') handleUpdateTag(tag.id);
+                          if (e.key === 'Escape') cancelEditing();
+                        }}
+                        className="flex-1 rounded border px-3 py-1"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => handleUpdateTag(tag.id)}
+                        disabled={updateTag.isPending}
+                        className="rounded bg-green-600 px-3 py-1 text-sm text-white hover:bg-green-700"
+                      >
+                        保存
+                      </button>
+                      <button
+                        onClick={cancelEditing}
+                        className="rounded border px-3 py-1 text-sm text-gray-600 hover:bg-gray-100"
+                      >
+                        キャンセル
+                      </button>
+                    </>
+                  ) : deleteConfirmId === tag.id ? (
+                    <>
+                      <span className="flex-1 text-red-600">
+                        「{tag.name}」を削除しますか？
+                      </span>
+                      <button
+                        onClick={() => handleDeleteTag(tag.id)}
+                        disabled={deleteTag.isPending}
+                        className="rounded bg-red-600 px-3 py-1 text-sm text-white hover:bg-red-700"
+                      >
+                        {deleteTag.isPending ? '削除中...' : '削除'}
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(null)}
+                        className="rounded border px-3 py-1 text-sm text-gray-600 hover:bg-gray-100"
+                      >
+                        キャンセル
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <span
+                        className="h-4 w-4 rounded-full"
+                        style={{ backgroundColor: tag.color || '#888' }}
+                      />
+                      <span className="flex-1 font-medium">{tag.name}</span>
+                      <button
+                        onClick={() => startEditing(tag)}
+                        className="rounded border px-3 py-1 text-sm text-gray-600 hover:bg-gray-100"
+                      >
+                        編集
+                      </button>
+                      <button
+                        onClick={() => setDeleteConfirmId(tag.id)}
+                        className="rounded border border-red-200 px-3 py-1 text-sm text-red-600 hover:bg-red-50"
+                      >
+                        削除
+                      </button>
+                    </>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </div>
       ) : viewMode === 'calendar' ? (
