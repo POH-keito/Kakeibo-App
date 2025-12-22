@@ -4,6 +4,8 @@ import {
   useEnrichedTransactions,
   useUsers,
   useBurdenRatio,
+  useApplyDefaultRatio,
+  useSaveOverridesBatch,
 } from '../lib/api';
 import type { EnrichedTransaction } from '../lib/types';
 import { TransactionsSkeleton } from '../components/Skeleton';
@@ -94,28 +96,30 @@ function TransactionsPage() {
     [pendingChanges]
   );
 
+  // Mutations
+  const applyDefaultRatio = useApplyDefaultRatio();
+  const saveOverridesBatch = useSaveOverridesBatch();
+
   // Apply default burden ratio to all transactions
   const handleApplyDefault = async () => {
     if (!burdenRatio?.details) return;
 
     setSaveStatus('saving');
     try {
-      const res = await fetch('/api/transactions/apply-default-ratio', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          year,
-          month,
-          ratioDetails: burdenRatio.details,
-        }),
-      });
+      const householdTransactions = transactions.filter(
+        (tx) => tx.processing_status === '按分_家計'
+      );
+      const moneyforwardIds = householdTransactions.map((tx) => tx.moneyforward_id);
 
-      if (!res.ok) throw new Error('Failed to apply default');
+      await applyDefaultRatio.mutateAsync({
+        year,
+        month,
+        moneyforwardIds,
+      });
 
       setPendingChanges(new Map());
       setSaveStatus('saved');
       setTimeout(() => setSaveStatus('idle'), 2000);
-      window.location.reload(); // Refresh to get updated data
     } catch {
       setSaveStatus('error');
     }
@@ -139,13 +143,7 @@ function TransactionsPage() {
         }));
       });
 
-      const res = await fetch('/api/transactions/overrides', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ overrides }),
-      });
-
-      if (!res.ok) throw new Error('Failed to save');
+      await saveOverridesBatch.mutateAsync(overrides);
 
       setPendingChanges(new Map());
       setSaveStatus('saved');
@@ -324,9 +322,6 @@ function TransactionRow({
       prev.map((s) => (s.userId === userId ? { ...s, percent } : s))
     );
   };
-
-  const totalPercent = editShares.reduce((sum, s) => sum + s.percent, 0);
-  const isValidTotal = Math.abs(totalPercent - 100) < 0.01;
 
   return (
     <div className="rounded-lg bg-white p-4 shadow">

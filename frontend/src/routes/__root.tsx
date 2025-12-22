@@ -1,20 +1,14 @@
 import { createRootRouteWithContext, Link, Outlet } from '@tanstack/react-router';
 import { TanStackRouterDevtools } from '@tanstack/router-devtools';
-import { useQuery, type QueryClient } from '@tanstack/react-query';
+import { type QueryClient } from '@tanstack/react-query';
 import { useEffect, useState } from 'react';
 import { ToastProvider } from '../lib/toast';
 import { ToastContainer } from '../components/Toast';
 import { useToast } from '../hooks/useToast';
+import { useCurrentUser } from '../lib/api';
 
 interface RouterContext {
   queryClient: QueryClient;
-}
-
-// Fetch current user
-async function fetchMe() {
-  const res = await fetch('/api/auth/me');
-  if (!res.ok) throw new Error('Failed to fetch user');
-  return res.json() as Promise<{ email: string; role: 'admin' | 'viewer' }>;
 }
 
 export const Route = createRootRouteWithContext<RouterContext>()({
@@ -30,10 +24,7 @@ function RootLayout() {
 }
 
 function RootLayoutInner() {
-  const { data: me, isLoading } = useQuery({
-    queryKey: ['me'],
-    queryFn: fetchMe,
-  });
+  const { data: me, isLoading } = useCurrentUser();
 
   const toast = useToast();
   const [isOffline, setIsOffline] = useState(!navigator.onLine);

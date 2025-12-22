@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useMemo } from 'react';
-import { useTags, useTransactions, useTransactionTags, useCategories } from '../lib/api';
+import { useTags, useTransactions, useTransactionTags, useCategories, useAssignTags, useUnassignTags } from '../lib/api';
 import { CalendarView, DayTransactionModal } from '../components/CalendarView';
 import type { Transaction } from '../lib/types';
 
@@ -25,7 +25,11 @@ function TagsPage() {
   const { data: categories = [] } = useCategories();
 
   const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id);
-  const { data: transactionTags = [] } = useTransactionTags(moneyforwardIds);
+  const { data: transactionTags = [], refetch: refetchTags } = useTransactionTags(moneyforwardIds);
+
+  // Mutations
+  const assignTags = useAssignTags();
+  const unassignTags = useUnassignTags();
 
   // Group transactions by tag
   const tagSummary = useMemo(() => {
@@ -68,9 +72,10 @@ function TagsPage() {
   };
 
   const handleSaveTagChanges = async (changes: { moneyforward_id: string; tag_ids: number[] }[]) => {
-    // For each transaction, sync tags by:
-    // 1. Remove all existing tags
-    // 2. Add all new tags
+    // Batch operations by tagId to reduce API calls (N+1 optimization)
+    const additionsByTag = new Map<number, string[]>();
+    const removalsByTag = new Map<number, string[]>();
+
     for (const { moneyforward_id, tag_ids } of changes) {
       const currentTags = transactionTags
         .filter((tt) => tt.moneyforward_id === moneyforward_id)
@@ -79,30 +84,37 @@ function TagsPage() {
       const currentSet = new Set(currentTags);
       const newSet = new Set(tag_ids);
 
-      // Find tags to add
-      const toAdd = tag_ids.filter((id) => !currentSet.has(id));
-      // Find tags to remove
-      const toRemove = currentTags.filter((id) => !newSet.has(id));
-
-      // Execute additions
-      for (const tagId of toAdd) {
-        // TODO: Implement bulk tag assignment API
-        await fetch(`/api/tags/assign`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tag_id: tagId, moneyforward_ids: [moneyforward_id] }),
-        });
+      // Group additions by tagId
+      for (const tagId of tag_ids) {
+        if (!currentSet.has(tagId)) {
+          const ids = additionsByTag.get(tagId) || [];
+          ids.push(moneyforward_id);
+          additionsByTag.set(tagId, ids);
+        }
       }
 
-      // Execute removals via API
-      for (const tagId of toRemove) {
-        await fetch(`/api/tags/unassign`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tag_id: tagId, moneyforward_ids: [moneyforward_id] }),
-        });
+      // Group removals by tagId
+      for (const tagId of currentTags) {
+        if (!newSet.has(tagId)) {
+          const ids = removalsByTag.get(tagId) || [];
+          ids.push(moneyforward_id);
+          removalsByTag.set(tagId, ids);
+        }
       }
     }
+
+    // Execute batched additions
+    for (const [tagId, moneyforwardIds] of additionsByTag) {
+      await assignTags.mutateAsync({ tagId, moneyforwardIds });
+    }
+
+    // Execute batched removals
+    for (const [tagId, moneyforwardIds] of removalsByTag) {
+      await unassignTags.mutateAsync({ tagId, moneyforwardIds });
+    }
+
+    // Refetch tags to update UI
+    await refetchTags();
   };
 
   const years = Array.from({ length: 3 }, (_, i) => (now.getFullYear() - i).toString());
