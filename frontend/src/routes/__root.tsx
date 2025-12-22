@@ -1,6 +1,10 @@
 import { createRootRouteWithContext, Link, Outlet } from '@tanstack/react-router';
 import { TanStackRouterDevtools } from '@tanstack/router-devtools';
 import { useQuery, type QueryClient } from '@tanstack/react-query';
+import { useEffect, useState } from 'react';
+import { ToastProvider } from '../lib/toast';
+import { ToastContainer } from '../components/Toast';
+import { useToast } from '../hooks/useToast';
 
 interface RouterContext {
   queryClient: QueryClient;
@@ -18,10 +22,41 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 });
 
 function RootLayout() {
+  return (
+    <ToastProvider>
+      <RootLayoutInner />
+    </ToastProvider>
+  );
+}
+
+function RootLayoutInner() {
   const { data: me, isLoading } = useQuery({
     queryKey: ['me'],
     queryFn: fetchMe,
   });
+
+  const toast = useToast();
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    const handleOnline = () => {
+      setIsOffline(false);
+      toast.success('インターネット接続が復旧しました');
+    };
+
+    const handleOffline = () => {
+      setIsOffline(true);
+      toast.warning('インターネット接続がありません', 0); // 0 = no auto-dismiss
+    };
+
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+
+    return () => {
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
+    };
+  }, [toast]);
 
   if (isLoading) {
     return (
@@ -35,6 +70,13 @@ function RootLayout() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      {/* Offline banner */}
+      {isOffline && (
+        <div className="bg-yellow-500 text-white px-4 py-2 text-center text-sm font-medium">
+          オフライン: インターネット接続がありません
+        </div>
+      )}
+
       {/* Header */}
       <header className="bg-white shadow-sm">
         <div className="mx-auto max-w-7xl px-4 py-4">
@@ -74,6 +116,9 @@ function RootLayout() {
       <main className="mx-auto max-w-7xl px-4 py-6">
         <Outlet />
       </main>
+
+      {/* Toast notifications */}
+      <ToastContainer />
 
       {/* Devtools (only in development) */}
       {import.meta.env.DEV && <TanStackRouterDevtools position="bottom-right" />}

@@ -8,6 +8,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { logger } from 'hono/logger';
 import { authMiddleware, type AuthUser } from './middleware/auth.js';
+import { errorHandler } from './middleware/error.js';
 import authRoutes from './routes/auth.js';
 import masterRoutes from './routes/master.js';
 import transactionRoutes from './routes/transactions.js';
@@ -26,6 +27,7 @@ const app = new Hono<{
 
 // Global middleware
 app.use('*', logger());
+app.use('*', errorHandler);
 app.use(
   '/api/*',
   cors({
