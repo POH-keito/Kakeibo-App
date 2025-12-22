@@ -225,15 +225,19 @@ function DashboardPage() {
             <SummaryCard
               title="総支出"
               amount={summary?.totalSpending || 0}
-              className="bg-blue-50"
+              variant="primary"
             />
-            {users.map((user) => (
-              <SummaryCard
-                key={user.id}
-                title={user.aliases[0] || user.name}
-                amount={summary?.userShares[user.id] || 0}
-              />
-            ))}
+            {users.map((user) => {
+              const tatekaeAmount = summary?.userTatekae?.[user.id] || 0;
+              return (
+                <SummaryCard
+                  key={user.id}
+                  title={user.aliases[0] || user.name}
+                  amount={summary?.userShares[user.id] || 0}
+                  tatekae={tatekaeAmount > 0 ? tatekaeAmount : undefined}
+                />
+              );
+            })}
           </div>
 
           {/* Cost Trend Chart */}
@@ -317,9 +321,13 @@ function DashboardPage() {
             </div>
 
             {/* Cost Type Breakdown */}
-            <div className="rounded-lg bg-white p-6 shadow">
-              <h3 className="mb-4 text-lg font-semibold">コストタイプ別内訳</h3>
-              <CostTypeTree data={costTypeSummary} onAmountClick={openCostTypeModal} />
+            <div className="rounded-2xl bg-white p-6 shadow-lg">
+              <h3 className="mb-4 text-lg font-bold tracking-tight text-gray-900">コストタイプ別内訳</h3>
+              {summary?.byCostTypeHierarchy ? (
+                <CostTypeTreeNew data={summary.byCostTypeHierarchy} onAmountClick={openCostTypeModal} />
+              ) : (
+                <CostTypeTree data={costTypeSummary} onAmountClick={openCostTypeModal} />
+              )}
             </div>
           </div>
 
@@ -372,20 +380,178 @@ function DashboardPage() {
 function SummaryCard({
   title,
   amount,
-  className = '',
+  tatekae,
+  variant = 'default',
 }: {
   title: string;
   amount: number;
-  className?: string;
+  tatekae?: number;
+  variant?: 'default' | 'primary';
 }) {
+  const bgClass = variant === 'primary'
+    ? 'bg-gradient-to-br from-blue-600 to-blue-700 text-white'
+    : 'bg-white';
+  const titleClass = variant === 'primary'
+    ? 'text-blue-100'
+    : 'text-gray-500';
+  const amountClass = variant === 'primary'
+    ? 'text-white'
+    : 'text-gray-900';
+
   return (
-    <div className={`rounded-lg bg-white p-6 shadow ${className}`}>
-      <h3 className="text-sm font-medium text-gray-600">{title}</h3>
-      <p className="mt-2 text-2xl font-bold">¥{amount.toLocaleString()}</p>
+    <div className={`relative overflow-hidden rounded-2xl p-6 shadow-lg transition-transform hover:scale-[1.02] ${bgClass}`}>
+      {/* Subtle pattern overlay for depth */}
+      {variant === 'primary' && (
+        <div className="absolute inset-0 opacity-10" style={{
+          backgroundImage: 'radial-gradient(circle at 20% 50%, white 1px, transparent 1px)',
+          backgroundSize: '20px 20px',
+        }} />
+      )}
+
+      <div className="relative">
+        <h3 className={`text-sm font-medium tracking-wide ${titleClass}`}>{title}</h3>
+        <p className={`mt-2 text-3xl font-bold tracking-tight ${amountClass}`}>
+          ¥{amount.toLocaleString()}
+        </p>
+
+        {/* Tatekae (立替) indicator */}
+        {tatekae !== undefined && tatekae > 0 && (
+          <div className="mt-3 flex items-center gap-2 rounded-lg bg-amber-50 px-3 py-2">
+            <span className="text-xs font-medium text-amber-700">立替</span>
+            <span className="text-sm font-bold text-amber-800">
+              ¥{tatekae.toLocaleString()}
+            </span>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
 
+// New CostTypeTree using backend's byCostTypeHierarchy
+function CostTypeTreeNew({
+  data,
+  onAmountClick,
+}: {
+  data: Record<string, { total: number; byMajor: Record<string, { total: number; byMinor: Record<string, number> }> }>;
+  onAmountClick: (costType: string, majorName?: string, minorName?: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+
+  const toggle = (key: string) => {
+    const next = new Set(expanded);
+    if (next.has(key)) {
+      next.delete(key);
+    } else {
+      next.add(key);
+    }
+    setExpanded(next);
+  };
+
+  const costTypeColors: Record<string, { bg: string; text: string; accent: string }> = {
+    '固定': { bg: 'bg-blue-50', text: 'text-blue-900', accent: 'border-blue-400' },
+    '変動': { bg: 'bg-emerald-50', text: 'text-emerald-900', accent: 'border-emerald-400' },
+  };
+
+  return (
+    <div className="space-y-3">
+      {Object.entries(data)
+        .filter(([, costTypeData]) => costTypeData.total > 0)
+        .sort(([, a], [, b]) => b.total - a.total)
+        .map(([costType, costTypeData]) => {
+          const colors = costTypeColors[costType] || { bg: 'bg-gray-50', text: 'text-gray-900', accent: 'border-gray-400' };
+          const isExpanded = expanded.has(costType);
+
+          return (
+            <div key={costType} className={`overflow-hidden rounded-xl ${colors.bg}`}>
+              {/* Cost Type Header */}
+              <div
+                className={`flex cursor-pointer items-center justify-between border-l-4 px-4 py-3 transition-colors hover:bg-white/50 ${colors.accent}`}
+                onClick={() => toggle(costType)}
+              >
+                <div className="flex items-center gap-3">
+                  <span className={`transform text-sm transition-transform ${isExpanded ? 'rotate-90' : ''}`}>
+                    ▶
+                  </span>
+                  <span className={`font-bold ${colors.text}`}>{costType}</span>
+                </div>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onAmountClick(costType);
+                  }}
+                  className={`font-bold ${colors.text} hover:underline`}
+                >
+                  ¥{costTypeData.total.toLocaleString()}
+                </button>
+              </div>
+
+              {/* Major Categories */}
+              {isExpanded && (
+                <div className="border-t border-white/50 bg-white/30 px-2 py-2">
+                  {Object.entries(costTypeData.byMajor)
+                    .sort(([, a], [, b]) => b.total - a.total)
+                    .map(([majorName, majorData]) => {
+                      const majorKey = `${costType}-${majorName}`;
+                      const isMajorExpanded = expanded.has(majorKey);
+
+                      return (
+                        <div key={majorName} className="ml-4">
+                          <div
+                            className="flex cursor-pointer items-center justify-between rounded-lg px-3 py-2 transition-colors hover:bg-white/60"
+                            onClick={() => toggle(majorKey)}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className={`transform text-xs text-gray-400 transition-transform ${isMajorExpanded ? 'rotate-90' : ''}`}>
+                                ▶
+                              </span>
+                              <span className="text-sm font-medium text-gray-700">{majorName}</span>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onAmountClick(costType, majorName);
+                              }}
+                              className="text-sm font-semibold text-gray-600 hover:text-blue-600 hover:underline"
+                            >
+                              ¥{majorData.total.toLocaleString()}
+                            </button>
+                          </div>
+
+                          {/* Minor Categories */}
+                          {isMajorExpanded && (
+                            <div className="ml-6 space-y-1 border-l border-gray-200 py-1 pl-3">
+                              {Object.entries(majorData.byMinor)
+                                .sort(([, a], [, b]) => b - a)
+                                .map(([minorName, amount]) => (
+                                  <div
+                                    key={minorName}
+                                    className="flex items-center justify-between rounded px-2 py-1 text-xs transition-colors hover:bg-white/60"
+                                  >
+                                    <span className="text-gray-500">{minorName}</span>
+                                    <button
+                                      onClick={() => onAmountClick(costType, majorName, minorName)}
+                                      className="font-medium text-gray-600 hover:text-blue-600 hover:underline"
+                                    >
+                                      ¥{amount.toLocaleString()}
+                                    </button>
+                                  </div>
+                                ))}
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+    </div>
+  );
+}
+
+// Legacy CostTypeTree (fallback)
 function CostTypeTree({
   data,
   onAmountClick,
