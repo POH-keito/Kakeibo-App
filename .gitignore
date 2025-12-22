@@ -30,5 +30,5 @@ coverage/
 playwright-report/
 test-results/
 
-# TanStack Router generated files
-frontend/src/routeTree.gen.ts
+# TanStack Router generated files - now committed for CI/CD builds
+# frontend/src/routeTree.gen.ts
