@@ -34,12 +34,13 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   return res.json();
 }
 
-// Master data hooks
+// Master data hooks (low-frequency updates)
 export function useCategories() {
   return useQuery({
     queryKey: ['categories'],
     queryFn: () => fetchApi<Category[]>('/master/categories'),
-    staleTime: 1000 * 60 * 30, // 30 minutes
+    staleTime: 1 * 60 * 60 * 1000, // 1 hour
+    gcTime: 24 * 60 * 60 * 1000,   // 24 hours
   });
 }
 
@@ -47,7 +48,8 @@ export function useUsers() {
   return useQuery({
     queryKey: ['users'],
     queryFn: () => fetchApi<User[]>('/master/users'),
-    staleTime: 1000 * 60 * 30,
+    staleTime: 1 * 60 * 60 * 1000, // 1 hour
+    gcTime: 24 * 60 * 60 * 1000,   // 24 hours
   });
 }
 
@@ -55,11 +57,12 @@ export function useTags() {
   return useQuery({
     queryKey: ['tags'],
     queryFn: () => fetchApi<Tag[]>('/master/tags'),
-    staleTime: 1000 * 60 * 5,
+    staleTime: 1 * 60 * 60 * 1000, // 1 hour
+    gcTime: 24 * 60 * 60 * 1000,   // 24 hours
   });
 }
 
-// Transaction hooks
+// Transaction hooks (high-frequency updates)
 export function useTransactions(year: string, month: string, includeTagged = false) {
   return useQuery({
     queryKey: ['transactions', year, month, includeTagged],
@@ -67,6 +70,8 @@ export function useTransactions(year: string, month: string, includeTagged = fal
       fetchApi<Transaction[]>(
         `/transactions?year=${year}&month=${month}&includeTagged=${includeTagged}`
       ),
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
   });
 }
 
@@ -78,6 +83,8 @@ export function useTransactionShares(moneyforwardIds: string[]) {
         ? fetchApi<TransactionShare[]>(`/transactions/shares?ids=${moneyforwardIds.join(',')}`)
         : Promise.resolve([]),
     enabled: moneyforwardIds.length > 0,
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
   });
 }
 
@@ -91,6 +98,8 @@ export function useTransactionOverrides(moneyforwardIds: string[]) {
           )
         : Promise.resolve([]),
     enabled: moneyforwardIds.length > 0,
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
   });
 }
 
@@ -102,6 +111,8 @@ export function useTransactionTags(moneyforwardIds: string[]) {
         ? fetchApi<TransactionTag[]>(`/transactions/tags?ids=${moneyforwardIds.join(',')}`)
         : Promise.resolve([]),
     enabled: moneyforwardIds.length > 0,
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
   });
 }
 
@@ -110,6 +121,8 @@ export function useBurdenRatio(year: string, month: string) {
     queryKey: ['burden-ratio', year, month],
     queryFn: () =>
       fetchApi<BurdenRatio | null>(`/transactions/burden-ratio?year=${year}&month=${month}`),
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
   });
 }
 
@@ -120,6 +133,8 @@ export function useMonthlySummary(year: string, month: string, includeTagged = f
       fetchApi<MonthlySummary>(
         `/transactions/summary?year=${year}&month=${month}&includeTagged=${includeTagged}`
       ),
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
   });
 }
 
@@ -180,6 +195,8 @@ export function useMonthlyMemo(targetMonth: string) {
   return useQuery({
     queryKey: ['monthly-memo', targetMonth],
     queryFn: () => fetchApi<MonthlyMemo | null>(`/memos/${targetMonth}`),
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
   });
 }
 
@@ -249,6 +266,8 @@ export function useTagTransactionCount(tagId: number | null) {
     queryFn: () =>
       tagId ? fetchApi<{ tag_id: number; transaction_count: number }>(`/tags/${tagId}/transactions`) : null,
     enabled: !!tagId,
+    staleTime: 5 * 60 * 1000,  // 5 minutes
+    gcTime: 30 * 60 * 1000,    // 30 minutes
   });
 }
 
