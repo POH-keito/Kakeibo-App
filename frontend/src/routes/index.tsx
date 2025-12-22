@@ -12,6 +12,7 @@ import {
   calculateCategorySummary,
 } from '../lib/api';
 import { PieChart, Pie, Cell, ResponsiveContainer, Legend, Tooltip } from 'recharts';
+import { TransactionModal } from '../components/TransactionModal';
 
 export const Route = createFileRoute('/')({
   component: DashboardPage,
@@ -50,6 +51,21 @@ function DashboardPage() {
   const [memoContent, setMemoContent] = useState('');
   const [memoSaveStatus, setMemoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
+  // TransactionModal state
+  const [modalState, setModalState] = useState<{
+    isOpen: boolean;
+    title: string;
+    filterContext?: {
+      type: 'category' | 'costType';
+      majorName?: string;
+      minorName?: string;
+      costType?: string;
+    };
+  }>({
+    isOpen: false,
+    title: '',
+  });
+
   // Sync memo content when loaded
   useMemo(() => {
     if (memo?.memo_content !== undefined) {
@@ -68,6 +84,16 @@ function DashboardPage() {
     () => calculateCostTypeSummary(transactions, categories),
     [transactions, categories]
   );
+
+  // Pie chart data
+  const pieChartData = useMemo(() => {
+    return Object.entries(categorySummary)
+      .map(([name, data]) => ({
+        name,
+        value: data.amount,
+      }))
+      .sort((a, b) => b.value - a.value);
+  }, [categorySummary]);
 
   // Burden ratio display
   const ratioDisplay = useMemo(() => {
@@ -89,6 +115,44 @@ function DashboardPage() {
     } catch {
       setMemoSaveStatus('error');
     }
+  };
+
+  const openCategoryModal = (majorName: string) => {
+    setModalState({
+      isOpen: true,
+      title: `${majorName}の取引一覧`,
+      filterContext: {
+        type: 'category',
+        majorName,
+      },
+    });
+  };
+
+  const openCostTypeModal = (costType: string, majorName?: string, minorName?: string) => {
+    let title = `${costType}`;
+    if (minorName) {
+      title = `${costType} > ${majorName} > ${minorName}`;
+    } else if (majorName) {
+      title = `${costType} > ${majorName}`;
+    }
+
+    setModalState({
+      isOpen: true,
+      title: `${title}の取引一覧`,
+      filterContext: {
+        type: 'costType',
+        costType,
+        majorName,
+        minorName,
+      },
+    });
+  };
+
+  const closeModal = () => {
+    setModalState({
+      isOpen: false,
+      title: '',
+    });
   };
 
   const years = Array.from({ length: 3 }, (_, i) => (now.getFullYear() - i).toString());
@@ -201,9 +265,12 @@ function DashboardPage() {
                   .map(([majorName, data]) => (
                     <div key={majorName} className="flex justify-between border-b py-2">
                       <span>{majorName}</span>
-                      <span className="font-medium">
+                      <button
+                        onClick={() => openCategoryModal(majorName)}
+                        className="font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                      >
                         ¥{data.amount.toLocaleString()}
-                      </span>
+                      </button>
                     </div>
                   ))}
               </div>
@@ -212,7 +279,7 @@ function DashboardPage() {
             {/* Cost Type Breakdown */}
             <div className="rounded-lg bg-white p-6 shadow">
               <h3 className="mb-4 text-lg font-semibold">コストタイプ別内訳</h3>
-              <CostTypeTree data={costTypeSummary} />
+              <CostTypeTree data={costTypeSummary} onAmountClick={openCostTypeModal} />
             </div>
           </div>
 
@@ -248,6 +315,16 @@ function DashboardPage() {
           </div>
         </>
       )}
+
+      {/* Transaction Modal */}
+      <TransactionModal
+        isOpen={modalState.isOpen}
+        onClose={closeModal}
+        transactions={transactions}
+        categories={categories}
+        title={modalState.title}
+        filterContext={modalState.filterContext}
+      />
     </div>
   );
 }
@@ -271,8 +348,10 @@ function SummaryCard({
 
 function CostTypeTree({
   data,
+  onAmountClick,
 }: {
   data: Record<string, { amount: number; majors: Record<string, { amount: number; minors: Record<string, number> }> }>;
+  onAmountClick: (costType: string, majorName?: string, minorName?: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
@@ -292,13 +371,23 @@ function CostTypeTree({
         .sort(([, a], [, b]) => b.amount - a.amount)
         .map(([costType, costTypeData]) => (
           <div key={costType}>
-            <button
-              onClick={() => toggle(costType)}
-              className="flex w-full justify-between rounded px-2 py-1 text-left hover:bg-gray-100"
-            >
-              <span className="font-medium">{costType}</span>
-              <span>¥{costTypeData.amount.toLocaleString()}</span>
-            </button>
+            <div className="flex w-full justify-between rounded px-2 py-1 hover:bg-gray-100">
+              <button
+                onClick={() => toggle(costType)}
+                className="flex-1 text-left font-medium"
+              >
+                {costType}
+              </button>
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onAmountClick(costType);
+                }}
+                className="text-blue-600 hover:text-blue-800 hover:underline"
+              >
+                ¥{costTypeData.amount.toLocaleString()}
+              </button>
+            </div>
 
             {expanded.has(costType) && (
               <div className="ml-4 border-l-2 border-gray-200 pl-2">
@@ -306,13 +395,23 @@ function CostTypeTree({
                   .sort(([, a], [, b]) => b.amount - a.amount)
                   .map(([majorName, majorData]) => (
                     <div key={majorName}>
-                      <button
-                        onClick={() => toggle(`${costType}-${majorName}`)}
-                        className="flex w-full justify-between rounded px-2 py-1 text-left text-sm hover:bg-gray-50"
-                      >
-                        <span>{majorName}</span>
-                        <span>¥{majorData.amount.toLocaleString()}</span>
-                      </button>
+                      <div className="flex w-full justify-between rounded px-2 py-1 hover:bg-gray-50">
+                        <button
+                          onClick={() => toggle(`${costType}-${majorName}`)}
+                          className="flex-1 text-left text-sm"
+                        >
+                          {majorName}
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onAmountClick(costType, majorName);
+                          }}
+                          className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          ¥{majorData.amount.toLocaleString()}
+                        </button>
+                      </div>
 
                       {expanded.has(`${costType}-${majorName}`) && (
                         <div className="ml-4 border-l border-gray-100 pl-2">
@@ -321,10 +420,15 @@ function CostTypeTree({
                             .map(([minorName, amount]) => (
                               <div
                                 key={minorName}
-                                className="flex justify-between px-2 py-0.5 text-xs text-gray-600"
+                                className="flex justify-between px-2 py-0.5 text-xs"
                               >
-                                <span>{minorName}</span>
-                                <span>¥{amount.toLocaleString()}</span>
+                                <span className="text-gray-600">{minorName}</span>
+                                <button
+                                  onClick={() => onAmountClick(costType, majorName, minorName)}
+                                  className="text-blue-600 hover:text-blue-800 hover:underline"
+                                >
+                                  ¥{amount.toLocaleString()}
+                                </button>
                               </div>
                             ))}
                         </div>
