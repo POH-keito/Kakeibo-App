@@ -1,7 +1,17 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useCallback } from 'react';
-import { useTags, useCreateTag, useUpdateTag, useDeleteTag } from '../lib/api';
-import type { Tag } from '../lib/types';
+import {
+  useTags,
+  useCreateTag,
+  useUpdateTag,
+  useDeleteTag,
+  useBurdenRatios,
+  useCreateBurdenRatio,
+  useUpdateBurdenRatio,
+  useDeleteBurdenRatio,
+  useUsers,
+} from '../lib/api';
+import type { Tag, BurdenRatio } from '../lib/types';
 
 export const Route = createFileRoute('/settings')({
   component: SettingsPage,
@@ -25,12 +35,28 @@ function SettingsPage() {
   const updateTag = useUpdateTag();
   const deleteTag = useDeleteTag();
 
+  const { data: burdenRatios = [], isLoading: ratiosLoading } = useBurdenRatios();
+  const createBurdenRatio = useCreateBurdenRatio();
+  const updateBurdenRatio = useUpdateBurdenRatio();
+  const deleteBurdenRatio = useDeleteBurdenRatio();
+  const { data: users = [] } = useUsers();
+
   const [newTagName, setNewTagName] = useState('');
   const [newTagColor, setNewTagColor] = useState(TAG_COLORS[0].value);
   const [editingTag, setEditingTag] = useState<Tag | null>(null);
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Burden ratio state
+  const [isCreatingRatio, setIsCreatingRatio] = useState(false);
+  const [editingRatio, setEditingRatio] = useState<BurdenRatio | null>(null);
+  const [newMonth, setNewMonth] = useState(() => {
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  });
+  const [ratioPercentages, setRatioPercentages] = useState<Record<number, number>>({});
+  const [ratioError, setRatioError] = useState<string | null>(null);
 
   // Handle create tag
   const handleCreate = useCallback(async () => {
@@ -105,6 +131,109 @@ function SettingsPage() {
     },
     [deleteTag]
   );
+
+  // Burden ratio handlers
+  const initializeRatioPercentages = useCallback((ratio?: BurdenRatio) => {
+    const percentages: Record<number, number> = {};
+    if (ratio?.details) {
+      ratio.details.forEach((detail) => {
+        percentages[detail.user_id] = detail.ratio_percent;
+      });
+    } else {
+      // Default: equal split
+      const defaultPercent = users.length > 0 ? Math.floor(100 / users.length) : 0;
+      users.forEach((user) => {
+        percentages[user.id] = defaultPercent;
+      });
+    }
+    setRatioPercentages(percentages);
+  }, [users]);
+
+  const handleCreateRatioStart = useCallback(() => {
+    setIsCreatingRatio(true);
+    setEditingRatio(null);
+    initializeRatioPercentages();
+    setRatioError(null);
+  }, [initializeRatioPercentages]);
+
+  const handleEditRatioStart = useCallback((ratio: BurdenRatio) => {
+    setEditingRatio(ratio);
+    setIsCreatingRatio(false);
+    initializeRatioPercentages(ratio);
+    setRatioError(null);
+  }, [initializeRatioPercentages]);
+
+  const handleRatioCancel = useCallback(() => {
+    setIsCreatingRatio(false);
+    setEditingRatio(null);
+    setRatioPercentages({});
+    setRatioError(null);
+  }, []);
+
+  const handleRatioSave = useCallback(async () => {
+    // Validate total equals 100%
+    const total = Object.values(ratioPercentages).reduce((sum, val) => sum + val, 0);
+    if (Math.abs(total - 100) > 0.01) {
+      setRatioError('合計が100%である必要があります');
+      return;
+    }
+
+    const details = Object.entries(ratioPercentages).map(([userId, percent]) => ({
+      user_id: parseInt(userId),
+      ratio_percent: percent,
+    }));
+
+    try {
+      if (editingRatio) {
+        await updateBurdenRatio.mutateAsync({ id: editingRatio.id, details });
+      } else {
+        await createBurdenRatio.mutateAsync({ effectiveMonth: newMonth, details });
+      }
+      handleRatioCancel();
+    } catch (err) {
+      setRatioError(err instanceof Error ? err.message : '按分比率の保存に失敗しました');
+    }
+  }, [ratioPercentages, editingRatio, newMonth, createBurdenRatio, updateBurdenRatio, handleRatioCancel]);
+
+  const handleRatioDelete = useCallback(async (ratio: BurdenRatio) => {
+    if (!window.confirm(`${ratio.effective_month}の按分比率を削除しますか？`)) {
+      return;
+    }
+
+    try {
+      await deleteBurdenRatio.mutateAsync(ratio.id);
+      setRatioError(null);
+    } catch (err) {
+      setRatioError(err instanceof Error ? err.message : '按分比率の削除に失敗しました');
+    }
+  }, [deleteBurdenRatio]);
+
+  const handleCopyFromPrevious = useCallback(() => {
+    if (burdenRatios.length === 0) return;
+
+    // Get the most recent ratio
+    const latest = burdenRatios[0];
+    initializeRatioPercentages(latest);
+  }, [burdenRatios, initializeRatioPercentages]);
+
+  const updateRatioPercent = useCallback((userId: number, value: string) => {
+    const percent = parseFloat(value) || 0;
+    setRatioPercentages((prev) => ({ ...prev, [userId]: percent }));
+  }, []);
+
+  const getTotalPercent = useCallback(() => {
+    return Object.values(ratioPercentages).reduce((sum, val) => sum + val, 0);
+  }, [ratioPercentages]);
+
+  const formatRatioSummary = useCallback((ratio: BurdenRatio) => {
+    return ratio.details
+      .map((detail) => {
+        const user = users.find((u) => u.id === detail.user_id);
+        const alias = user?.aliases[0] || user?.name || `User ${detail.user_id}`;
+        return `${alias} ${detail.ratio_percent}%`;
+      })
+      .join(' / ');
+  }, [users]);
 
   return (
     <div className="space-y-6">
@@ -249,12 +378,140 @@ function SettingsPage() {
         )}
       </div>
 
-      {/* Additional Settings Placeholder */}
+      {/* Burden Ratio Management */}
       <div className="rounded-lg bg-white p-6 shadow">
-        <h3 className="mb-4 text-lg font-semibold">その他の設定</h3>
-        <p className="text-gray-600">
-          カテゴリ編集、按分比率のデフォルト設定などは今後追加予定です。
-        </p>
+        <h3 className="mb-4 text-lg font-semibold">按分比率設定</h3>
+
+        {ratioError && (
+          <div className="mb-4 rounded-lg bg-red-50 p-4 text-red-600">{ratioError}</div>
+        )}
+
+        {/* Create/Edit Form */}
+        {(isCreatingRatio || editingRatio) && (
+          <div className="mb-6 rounded-lg bg-gray-50 p-4">
+            <h4 className="mb-3 text-sm font-medium text-gray-700">
+              {editingRatio ? `${editingRatio.effective_month}の按分比率を編集` : '新規按分比率作成'}
+            </h4>
+
+            {!editingRatio && (
+              <div className="mb-4">
+                <label className="block text-sm text-gray-600 mb-1">対象月</label>
+                <input
+                  type="month"
+                  value={newMonth}
+                  onChange={(e) => setNewMonth(e.target.value)}
+                  className="rounded border px-3 py-2"
+                />
+              </div>
+            )}
+
+            <div className="space-y-3 mb-4">
+              {users.map((user) => (
+                <div key={user.id} className="flex items-center gap-4">
+                  <label className="w-24 text-sm font-medium">
+                    {user.aliases[0] || user.name}
+                  </label>
+                  <input
+                    type="number"
+                    min="0"
+                    max="100"
+                    step="0.1"
+                    value={ratioPercentages[user.id] || 0}
+                    onChange={(e) => updateRatioPercent(user.id, e.target.value)}
+                    className="w-24 rounded border px-3 py-2 text-right"
+                  />
+                  <span className="text-sm text-gray-600">%</span>
+                </div>
+              ))}
+              <div className="flex items-center gap-4 pt-2 border-t">
+                <span className="w-24 text-sm font-semibold">合計</span>
+                <span
+                  className={`w-24 text-right font-semibold ${
+                    Math.abs(getTotalPercent() - 100) < 0.01 ? 'text-green-600' : 'text-red-600'
+                  }`}
+                >
+                  {getTotalPercent().toFixed(1)}%
+                </span>
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleRatioSave}
+                disabled={createBurdenRatio.isPending || updateBurdenRatio.isPending}
+                className="rounded bg-green-600 px-4 py-2 text-white hover:bg-green-700 disabled:opacity-50"
+              >
+                {createBurdenRatio.isPending || updateBurdenRatio.isPending
+                  ? '保存中...'
+                  : '保存'}
+              </button>
+              <button
+                onClick={handleRatioCancel}
+                className="rounded bg-gray-500 px-4 py-2 text-white hover:bg-gray-600"
+              >
+                キャンセル
+              </button>
+              {!editingRatio && burdenRatios.length > 0 && (
+                <button
+                  onClick={handleCopyFromPrevious}
+                  className="rounded bg-blue-100 px-4 py-2 text-blue-700 hover:bg-blue-200"
+                >
+                  前月からコピー
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Create Button */}
+        {!isCreatingRatio && !editingRatio && (
+          <button
+            onClick={handleCreateRatioStart}
+            className="mb-4 rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
+          >
+            新規作成
+          </button>
+        )}
+
+        {/* Burden Ratio List */}
+        {ratiosLoading ? (
+          <div className="flex h-32 items-center justify-center">
+            <div className="text-gray-600">読み込み中...</div>
+          </div>
+        ) : burdenRatios.length === 0 && !isCreatingRatio ? (
+          <div className="flex h-32 items-center justify-center">
+            <div className="text-gray-500">按分比率が設定されていません</div>
+          </div>
+        ) : (
+          <div className="space-y-2">
+            {burdenRatios.map((ratio) => (
+              <div
+                key={ratio.id}
+                className="flex items-center justify-between rounded-lg border p-3"
+              >
+                <div>
+                  <div className="font-medium">{ratio.effective_month}</div>
+                  <div className="text-sm text-gray-600">{formatRatioSummary(ratio)}</div>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleEditRatioStart(ratio)}
+                    className="rounded bg-gray-100 px-3 py-1 text-sm text-gray-700 hover:bg-gray-200"
+                  >
+                    編集
+                  </button>
+                  <button
+                    onClick={() => handleRatioDelete(ratio)}
+                    disabled={deleteBurdenRatio.isPending}
+                    className="rounded bg-red-100 px-3 py-1 text-sm text-red-700 hover:bg-red-200 disabled:opacity-50"
+                  >
+                    削除
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

@@ -249,7 +249,7 @@ function DashboardPage() {
                       tickFormatter={(value) => `¥${(value / 1000).toFixed(0)}k`}
                     />
                     <Tooltip
-                      formatter={(value: number) => `¥${value.toLocaleString()}`}
+                      formatter={(value: number | undefined) => value ? `¥${value.toLocaleString()}` : ''}
                       labelFormatter={(label) => `${label}`}
                     />
                     <Legend />
