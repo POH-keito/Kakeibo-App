@@ -2,8 +2,6 @@ import { Hono } from 'hono';
 import { ncb, type Category, type User, type UserAlias, type Tag } from '../lib/ncb.js';
 import type { AuthUser } from '../middleware/auth.js';
 
-const HOUSEHOLD_ID = 1; // TODO: Get from user context
-
 const app = new Hono<{
   Variables: {
     user: AuthUser;
@@ -15,8 +13,11 @@ const app = new Hono<{
  * Returns all categories for the household
  */
 app.get('/categories', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const categories = await ncb.list<Category>('categories', {
-    where: { household_id: HOUSEHOLD_ID },
+    where: { household_id: householdId },
     order_by: [{ major_name: 'asc' }, { minor_name: 'asc' }],
   });
   return c.json(categories);
@@ -27,9 +28,12 @@ app.get('/categories', async (c) => {
  * Returns all users with their aliases
  */
 app.get('/users', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const [users, aliases] = await Promise.all([
     ncb.list<User>('users', {
-      where: { household_id: HOUSEHOLD_ID },
+      where: { household_id: householdId },
     }),
     ncb.list<UserAlias>('user_aliases', {}),
   ]);
@@ -48,8 +52,11 @@ app.get('/users', async (c) => {
  * Returns all tags for the household
  */
 app.get('/tags', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const tags = await ncb.list<Tag>('tags', {
-    where: { household_id: HOUSEHOLD_ID },
+    where: { household_id: householdId },
     order_by: { name: 'asc' },
   });
   return c.json(tags);

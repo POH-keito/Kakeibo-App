@@ -9,8 +9,6 @@ import {
 } from '../lib/ncb.js';
 import { requireAdmin, type AuthUser } from '../middleware/auth.js';
 
-const HOUSEHOLD_ID = 1;
-
 const app = new Hono<{
   Variables: {
     user: AuthUser;
@@ -107,9 +105,13 @@ app.post('/parse', async (c) => {
   });
   const existingSet = new Set(existing.map((t) => t.moneyforward_id));
 
+  // Get household_id from context
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   // Check for existing categories
   const categories = await ncb.list<Category>('categories', {
-    where: { household_id: HOUSEHOLD_ID },
+    where: { household_id: householdId },
   });
   const categorySet = new Set(categories.map((c) => `${c.major_name}|${c.minor_name}`));
 
@@ -150,12 +152,15 @@ app.post('/parse', async (c) => {
  * Create new categories
  */
 app.post('/categories', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const body = await c.req.json<{
     categories: { major_name: string; minor_name: string; cost_type: string }[];
   }>();
 
   const categoriesToCreate = body.categories.map((cat) => ({
-    household_id: HOUSEHOLD_ID,
+    household_id: householdId,
     major_name: cat.major_name,
     minor_name: cat.minor_name,
     cost_type: cat.cost_type,
@@ -171,12 +176,15 @@ app.post('/categories', async (c) => {
  * Execute the import
  */
 app.post('/execute', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const body = await c.req.json<{ transactions: ParsedTransaction[] }>();
   const { transactions } = body;
 
   // Get categories
   const categories = await ncb.list<Category>('categories', {
-    where: { household_id: HOUSEHOLD_ID },
+    where: { household_id: householdId },
   });
   const categoryMap = new Map(
     categories.map((c) => [`${c.major_name}|${c.minor_name}`, c])
@@ -203,7 +211,7 @@ app.post('/execute', async (c) => {
     // TODO: Add more rules for individual attribution
 
     toUpsert.push({
-      household_id: HOUSEHOLD_ID,
+      household_id: householdId,
       moneyforward_id: tx.moneyforward_id,
       transaction_date: tx.transaction_date,
       content: tx.content,
@@ -258,7 +266,7 @@ app.post('/execute', async (c) => {
     const shares: Partial<TransactionShare>[] = [];
     for (const [month, txs] of byMonth) {
       const ratios = await ncb.list<BurdenRatio>('burden_ratios', {
-        where: { household_id: HOUSEHOLD_ID, effective_month: month },
+        where: { household_id: householdId, effective_month: month },
       });
 
       if (ratios.length === 0) continue;

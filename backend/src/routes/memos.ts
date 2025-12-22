@@ -2,8 +2,6 @@ import { Hono } from 'hono';
 import { ncb, type MonthlyMemo } from '../lib/ncb.js';
 import type { AuthUser } from '../middleware/auth.js';
 
-const HOUSEHOLD_ID = 1; // TODO: Get from user context
-
 const app = new Hono<{
   Variables: {
     user: AuthUser;
@@ -15,11 +13,14 @@ const app = new Hono<{
  * Get memo for a specific month (format: YYYY-MM)
  */
 app.get('/:targetMonth', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const targetMonth = c.req.param('targetMonth');
 
   const memos = await ncb.list<MonthlyMemo>('monthly_memos', {
     where: {
-      household_id: HOUSEHOLD_ID,
+      household_id: householdId,
       target_month: targetMonth,
     },
   });
@@ -32,13 +33,16 @@ app.get('/:targetMonth', async (c) => {
  * Create or update memo for a specific month
  */
 app.put('/:targetMonth', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const targetMonth = c.req.param('targetMonth');
   const body = await c.req.json<{ memo_content: string }>();
 
   const result = await ncb.upsert<MonthlyMemo>(
     'monthly_memos',
     {
-      household_id: HOUSEHOLD_ID,
+      household_id: householdId,
       target_month: targetMonth,
       memo_content: body.memo_content,
     },
