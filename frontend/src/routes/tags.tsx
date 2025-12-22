@@ -8,7 +8,7 @@ export const Route = createFileRoute('/tags')({
   component: TagsPage,
 });
 
-type ViewMode = 'summary' | 'calendar';
+type ViewMode = 'summary' | 'calendar' | 'bulk';
 
 function TagsPage() {
   const now = new Date();
@@ -19,6 +19,12 @@ function TagsPage() {
   const [modalOpen, setModalOpen] = useState(false);
   const [modalDate, setModalDate] = useState('');
   const [modalTransactions, setModalTransactions] = useState<Transaction[]>([]);
+
+  // Bulk tagging state
+  const [bulkTagId, setBulkTagId] = useState<number | null>(null);
+  const [bulkIds, setBulkIds] = useState('');
+  const [bulkResult, setBulkResult] = useState<{ success: number; error: string | null } | null>(null);
+  const [bulkLoading, setBulkLoading] = useState(false);
 
   const { data: tags = [] } = useTags();
   const { data: transactions = [], isLoading } = useTransactions(year, month, true);
@@ -117,6 +123,38 @@ function TagsPage() {
     await refetchTags();
   };
 
+  const handleBulkTag = async () => {
+    if (!bulkTagId || !bulkIds.trim()) {
+      setBulkResult({ success: 0, error: 'タグとIDを入力してください' });
+      return;
+    }
+
+    setBulkLoading(true);
+    setBulkResult(null);
+
+    try {
+      // Parse IDs (one per line, trim whitespace)
+      const moneyforwardIds = bulkIds
+        .split('\n')
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+
+      if (moneyforwardIds.length === 0) {
+        setBulkResult({ success: 0, error: 'IDが入力されていません' });
+        setBulkLoading(false);
+        return;
+      }
+
+      await assignTags.mutateAsync({ tagId: bulkTagId, moneyforwardIds });
+      setBulkResult({ success: moneyforwardIds.length, error: null });
+      setBulkIds(''); // Clear input on success
+    } catch (err) {
+      setBulkResult({ success: 0, error: err instanceof Error ? err.message : '不明なエラー' });
+    } finally {
+      setBulkLoading(false);
+    }
+  };
+
   const years = Array.from({ length: 3 }, (_, i) => (now.getFullYear() - i).toString());
   const months = Array.from({ length: 12 }, (_, i) => (i + 1).toString().padStart(2, '0'));
 
@@ -169,12 +207,93 @@ function TagsPage() {
           >
             カレンダービュー
           </button>
+          <button
+            onClick={() => setViewMode('bulk')}
+            className={`rounded px-4 py-2 text-sm font-medium transition-colors ${
+              viewMode === 'bulk'
+                ? 'bg-white text-gray-900 shadow'
+                : 'text-gray-600 hover:text-gray-900'
+            }`}
+          >
+            一括タグ付け
+          </button>
         </div>
       </div>
 
-      {isLoading ? (
+      {isLoading && viewMode !== 'bulk' ? (
         <div className="flex h-64 items-center justify-center">
           <div className="text-lg text-gray-600">読み込み中...</div>
+        </div>
+      ) : viewMode === 'bulk' ? (
+        <div className="rounded-lg bg-white p-6 shadow">
+          <h3 className="mb-4 text-lg font-semibold text-gray-900">一括タグ付け</h3>
+          <p className="mb-4 text-sm text-gray-600">
+            MoneyForward IDを1行に1つずつ入力して、選択したタグを一括で付与します。
+          </p>
+
+          <div className="space-y-4">
+            {/* Tag selection */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                タグを選択
+              </label>
+              <select
+                value={bulkTagId ?? ''}
+                onChange={(e) => setBulkTagId(e.target.value ? Number(e.target.value) : null)}
+                className="w-full rounded border px-3 py-2"
+              >
+                <option value="">-- タグを選択 --</option>
+                {tags.map((tag) => (
+                  <option key={tag.id} value={tag.id}>
+                    {tag.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            {/* ID input textarea */}
+            <div>
+              <label className="mb-1 block text-sm font-medium text-gray-700">
+                MoneyForward ID（1行1ID）
+              </label>
+              <textarea
+                value={bulkIds}
+                onChange={(e) => setBulkIds(e.target.value)}
+                placeholder="ABC123...&#10;DEF456...&#10;GHI789..."
+                rows={10}
+                className="w-full rounded border px-3 py-2 font-mono text-sm"
+              />
+              <p className="mt-1 text-xs text-gray-500">
+                {bulkIds.split('\n').filter((id) => id.trim()).length} 件のIDが入力されています
+              </p>
+            </div>
+
+            {/* Submit button */}
+            <div className="flex items-center gap-4">
+              <button
+                onClick={handleBulkTag}
+                disabled={bulkLoading || !bulkTagId || !bulkIds.trim()}
+                className="rounded bg-green-600 px-6 py-2 font-medium text-white transition-colors hover:bg-green-700 disabled:cursor-not-allowed disabled:bg-gray-300"
+              >
+                {bulkLoading ? '処理中...' : '一括付与'}
+              </button>
+
+              {/* Result feedback */}
+              {bulkResult && (
+                <div
+                  className={`rounded px-4 py-2 text-sm ${
+                    bulkResult.error
+                      ? 'bg-red-100 text-red-700'
+                      : 'bg-green-100 text-green-700'
+                  }`}
+                >
+                  {bulkResult.error
+                    ? `エラー: ${bulkResult.error}`
+                    : `${bulkResult.success} 件にタグを付与しました`}
+                </div>
+              )}
+            </div>
+          </div>
         </div>
       ) : viewMode === 'calendar' ? (
         <>

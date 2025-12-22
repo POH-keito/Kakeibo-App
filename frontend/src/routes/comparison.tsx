@@ -1,7 +1,8 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { LineChart, Line, XAxis, YAxis, Legend, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { useUsers, useMonthlySummary } from '../lib/api';
+import { useUsers, useMonthlySummary, useTransactions, useCategories } from '../lib/api';
+import { TransactionModal } from '../components/TransactionModal';
 
 export const Route = createFileRoute('/comparison')({
   component: ComparisonPage,
@@ -11,6 +12,16 @@ const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444'];
 
 function ComparisonPage() {
   const { data: users = [] } = useUsers();
+  const { data: categories = [] } = useCategories();
+
+  // Modal state
+  const [modalOpen, setModalOpen] = useState(false);
+  const [modalYear, setModalYear] = useState('');
+  const [modalMonth, setModalMonth] = useState('');
+  const [modalCategory, setModalCategory] = useState('');
+
+  // Fetch transactions for modal (only when modal is open)
+  const { data: modalTransactions = [] } = useTransactions(modalYear, modalMonth, false);
 
   // Get last 4 months
   const months = useMemo(() => {
@@ -140,6 +151,14 @@ function ComparisonPage() {
     return ((current - previous) / previous) * 100;
   };
 
+  // Handle cell click to open modal
+  const handleCellClick = (year: string, month: string, majorName: string) => {
+    setModalYear(year);
+    setModalMonth(month);
+    setModalCategory(majorName);
+    setModalOpen(true);
+  };
+
   return (
     <div className="space-y-8">
       {/* Header */}
@@ -183,7 +202,11 @@ function ComparisonPage() {
                       const change = mIdx > 0 ? getChange(amount, prevAmount) : null;
 
                       return (
-                        <td key={m.label} className="px-4 py-3 text-right">
+                        <td
+                          key={m.label}
+                          className="cursor-pointer px-4 py-3 text-right transition-colors hover:bg-blue-100"
+                          onClick={() => handleCellClick(m.year, m.month, majorName)}
+                        >
                           <div className="font-medium text-gray-900">¥{amount.toLocaleString()}</div>
                           {change !== null && (
                             <div className={`text-xs ${change > 0 ? 'text-red-500' : change < 0 ? 'text-green-500' : 'text-gray-400'}`}>
@@ -325,6 +348,19 @@ function ComparisonPage() {
           </div>
         </div>
       </div>
+
+      {/* Transaction Modal */}
+      <TransactionModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        transactions={modalTransactions}
+        categories={categories}
+        title={`${modalYear}年${modalMonth}月 - ${modalCategory}`}
+        filterContext={{
+          type: 'category',
+          majorName: modalCategory,
+        }}
+      />
     </div>
   );
 }

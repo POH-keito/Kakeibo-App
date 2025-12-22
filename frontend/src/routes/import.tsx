@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/react-router';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useMemo } from 'react';
 import { useImportParse, useImportCategories, useImportExecute } from '../lib/api';
 
 export const Route = createFileRoute('/import')({
@@ -38,11 +38,51 @@ function ImportPage() {
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState(0);
   const [newCategoryTypes, setNewCategoryTypes] = useState<Record<string, string>>({});
+  const [previewTab, setPreviewTab] = useState<'detail' | 'pivot' | 'fullPivot'>('detail');
 
   // Mutations
   const importParse = useImportParse();
   const importCategories = useImportCategories();
   const importExecute = useImportExecute();
+
+  // Pivot summary (category-based)
+  const pivotSummary = useMemo(() => {
+    if (!parseResult?.transactions) return [];
+    const summary: Record<string, { major: string; minor: string; count: number; amount: number }> = {};
+    for (const tx of parseResult.transactions) {
+      const key = `${tx.major_name}|${tx.minor_name}`;
+      if (!summary[key]) {
+        summary[key] = { major: tx.major_name, minor: tx.minor_name, count: 0, amount: 0 };
+      }
+      summary[key].count++;
+      summary[key].amount += tx.amount;
+    }
+    return Object.values(summary).sort((a, b) => b.amount - a.amount);
+  }, [parseResult?.transactions]);
+
+  // Full pivot (status × category cross tabulation)
+  const fullPivot = useMemo(() => {
+    if (!parseResult?.transactions) return { statuses: [] as string[], categories: [] as string[], data: {} as Record<string, Record<string, number>> };
+    const statusSet = new Set<string>();
+    const categorySet = new Set<string>();
+    const data: Record<string, Record<string, number>> = {};
+
+    for (const tx of parseResult.transactions) {
+      const status = tx.processing_status;
+      const category = tx.major_name;
+      statusSet.add(status);
+      categorySet.add(category);
+
+      if (!data[status]) data[status] = {};
+      data[status][category] = (data[status][category] || 0) + Math.abs(tx.amount);
+    }
+
+    return {
+      statuses: Array.from(statusSet).sort(),
+      categories: Array.from(categorySet).sort(),
+      data,
+    };
+  }, [parseResult?.transactions]);
 
   // Handle file upload
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -240,33 +280,169 @@ function ImportPage() {
             </div>
           )}
 
-          {/* Transaction Preview */}
+          {/* Transaction Preview with Tabs */}
           <div className="rounded-lg bg-white p-6 shadow">
-            <h3 className="mb-4 text-lg font-semibold">
-              取引プレビュー (先頭20件)
-            </h3>
-            <div className="max-h-96 overflow-auto">
-              <table className="w-full text-sm">
-                <thead className="sticky top-0 bg-gray-100">
-                  <tr>
-                    <th className="px-2 py-1 text-left">日付</th>
-                    <th className="px-2 py-1 text-left">内容</th>
-                    <th className="px-2 py-1 text-left">カテゴリ</th>
-                    <th className="px-2 py-1 text-right">金額</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {parseResult.transactions.slice(0, 20).map((tx, idx) => (
-                    <tr key={idx} className={tx.processing_status.startsWith('集計除外') ? 'text-gray-400' : ''}>
-                      <td className="px-2 py-1">{tx.transaction_date}</td>
-                      <td className="px-2 py-1">{tx.content}</td>
-                      <td className="px-2 py-1">{tx.major_name} &gt; {tx.minor_name}</td>
-                      <td className="px-2 py-1 text-right">¥{tx.amount.toLocaleString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="mb-4 flex items-center justify-between">
+              <h3 className="text-lg font-semibold">取引プレビュー</h3>
+              <div className="flex items-center gap-1 rounded-lg border bg-gray-100 p-1">
+                <button
+                  onClick={() => setPreviewTab('detail')}
+                  className={`rounded px-3 py-1 text-sm font-medium transition-colors ${
+                    previewTab === 'detail'
+                      ? 'bg-white text-gray-900 shadow'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  詳細
+                </button>
+                <button
+                  onClick={() => setPreviewTab('pivot')}
+                  className={`rounded px-3 py-1 text-sm font-medium transition-colors ${
+                    previewTab === 'pivot'
+                      ? 'bg-white text-gray-900 shadow'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  ピボット集計
+                </button>
+                <button
+                  onClick={() => setPreviewTab('fullPivot')}
+                  className={`rounded px-3 py-1 text-sm font-medium transition-colors ${
+                    previewTab === 'fullPivot'
+                      ? 'bg-white text-gray-900 shadow'
+                      : 'text-gray-600 hover:text-gray-900'
+                  }`}
+                >
+                  フルピボット
+                </button>
+              </div>
             </div>
+
+            {/* Detail View */}
+            {previewTab === 'detail' && (
+              <div className="max-h-96 overflow-auto">
+                <p className="mb-2 text-sm text-gray-500">先頭20件を表示</p>
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-gray-100">
+                    <tr>
+                      <th className="px-2 py-1 text-left">日付</th>
+                      <th className="px-2 py-1 text-left">内容</th>
+                      <th className="px-2 py-1 text-left">カテゴリ</th>
+                      <th className="px-2 py-1 text-right">金額</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parseResult.transactions.slice(0, 20).map((tx, idx) => (
+                      <tr key={idx} className={tx.processing_status.startsWith('集計除外') ? 'text-gray-400' : ''}>
+                        <td className="px-2 py-1">{tx.transaction_date}</td>
+                        <td className="px-2 py-1">{tx.content}</td>
+                        <td className="px-2 py-1">{tx.major_name} &gt; {tx.minor_name}</td>
+                        <td className="px-2 py-1 text-right">¥{tx.amount.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
+            {/* Pivot Summary */}
+            {previewTab === 'pivot' && (
+              <div className="max-h-96 overflow-auto">
+                <p className="mb-2 text-sm text-gray-500">カテゴリ別の合計金額</p>
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-gray-100">
+                    <tr>
+                      <th className="px-2 py-1 text-left">大項目</th>
+                      <th className="px-2 py-1 text-left">中項目</th>
+                      <th className="px-2 py-1 text-right">件数</th>
+                      <th className="px-2 py-1 text-right">合計金額</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pivotSummary.map((row, idx) => (
+                      <tr key={idx} className="border-b">
+                        <td className="px-2 py-1">{row.major}</td>
+                        <td className="px-2 py-1">{row.minor}</td>
+                        <td className="px-2 py-1 text-right">{row.count}</td>
+                        <td className="px-2 py-1 text-right">¥{row.amount.toLocaleString()}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot className="bg-gray-50 font-semibold">
+                    <tr>
+                      <td className="px-2 py-1" colSpan={2}>合計</td>
+                      <td className="px-2 py-1 text-right">{pivotSummary.reduce((s, r) => s + r.count, 0)}</td>
+                      <td className="px-2 py-1 text-right">¥{pivotSummary.reduce((s, r) => s + r.amount, 0).toLocaleString()}</td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
+
+            {/* Full Pivot */}
+            {previewTab === 'fullPivot' && (
+              <div className="max-h-96 overflow-auto">
+                <p className="mb-2 text-sm text-gray-500">処理ステータス × カテゴリのクロス集計</p>
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-gray-100">
+                    <tr>
+                      <th className="px-2 py-1 text-left">ステータス</th>
+                      {fullPivot.categories.map((cat) => (
+                        <th key={cat} className="px-2 py-1 text-right">{cat}</th>
+                      ))}
+                      <th className="px-2 py-1 text-right font-bold">合計</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {fullPivot.statuses.map((status) => {
+                      const rowTotal = fullPivot.categories.reduce(
+                        (sum, cat) => sum + (fullPivot.data[status]?.[cat] || 0),
+                        0
+                      );
+                      return (
+                        <tr key={status} className="border-b">
+                          <td className="px-2 py-1 whitespace-nowrap">{status}</td>
+                          {fullPivot.categories.map((cat) => (
+                            <td key={cat} className="px-2 py-1 text-right">
+                              {fullPivot.data[status]?.[cat]
+                                ? `¥${fullPivot.data[status][cat].toLocaleString()}`
+                                : '-'}
+                            </td>
+                          ))}
+                          <td className="px-2 py-1 text-right font-semibold">¥{rowTotal.toLocaleString()}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                  <tfoot className="bg-gray-50 font-semibold">
+                    <tr>
+                      <td className="px-2 py-1">合計</td>
+                      {fullPivot.categories.map((cat) => {
+                        const colTotal = fullPivot.statuses.reduce(
+                          (sum, status) => sum + (fullPivot.data[status]?.[cat] || 0),
+                          0
+                        );
+                        return (
+                          <td key={cat} className="px-2 py-1 text-right">
+                            ¥{colTotal.toLocaleString()}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-1 text-right">
+                        ¥{fullPivot.statuses.reduce(
+                          (sum, status) =>
+                            sum + fullPivot.categories.reduce(
+                              (s, cat) => s + (fullPivot.data[status]?.[cat] || 0),
+                              0
+                            ),
+                          0
+                        ).toLocaleString()}
+                      </td>
+                    </tr>
+                  </tfoot>
+                </table>
+              </div>
+            )}
           </div>
 
           {/* Actions */}

@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useMemo, useRef, useEffect } from 'react';
+import Markdown from 'react-markdown';
 import {
   useTransactions,
   useCategories,
@@ -179,9 +180,15 @@ function AIPage() {
                         : 'bg-gray-100 text-gray-800'
                     }`}
                   >
-                    <div className="whitespace-pre-wrap text-sm">
-                      {msg.parts[0]?.text}
-                    </div>
+                    {msg.role === 'user' ? (
+                      <div className="whitespace-pre-wrap text-sm">
+                        {msg.parts[0]?.text}
+                      </div>
+                    ) : (
+                      <div className="prose prose-sm max-w-none">
+                        <Markdown>{msg.parts[0]?.text || ''}</Markdown>
+                      </div>
+                    )}
                   </div>
                 </div>
               ))}
