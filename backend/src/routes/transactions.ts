@@ -12,8 +12,6 @@ import {
 } from '../lib/ncb.js';
 import type { AuthUser } from '../middleware/auth.js';
 
-const HOUSEHOLD_ID = 1; // TODO: Get from user context
-
 const app = new Hono<{
   Variables: {
     user: AuthUser;
@@ -25,6 +23,9 @@ const app = new Hono<{
  * Query params: year, month, includeTagged
  */
 app.get('/', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const year = c.req.query('year') || new Date().getFullYear().toString();
   const month = c.req.query('month') || (new Date().getMonth() + 1).toString().padStart(2, '0');
   const includeTagged = c.req.query('includeTagged') === 'true';
@@ -37,7 +38,7 @@ app.get('/', async (c) => {
   // Fetch transactions for the month
   const rawTransactions = await ncb.list<Transaction>('transactions', {
     where: {
-      household_id: HOUSEHOLD_ID,
+      household_id: householdId,
       transaction_date: { _gte: firstDay },
     },
     order_by: { transaction_date: 'desc' },
@@ -170,13 +171,16 @@ app.get('/tags', async (c) => {
  * Get burden ratio for a specific month
  */
 app.get('/burden-ratio', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const year = c.req.query('year') || new Date().getFullYear().toString();
   const month = c.req.query('month') || (new Date().getMonth() + 1).toString().padStart(2, '0');
   const effectiveMonth = `${year}-${month}`;
 
   const ratios = await ncb.list<BurdenRatio>('burden_ratios', {
     where: {
-      household_id: HOUSEHOLD_ID,
+      household_id: householdId,
       effective_month: effectiveMonth,
     },
   });
@@ -200,6 +204,9 @@ app.get('/burden-ratio', async (c) => {
  * Get monthly summary (totals by category, user shares)
  */
 app.get('/summary', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const year = c.req.query('year') || new Date().getFullYear().toString();
   const month = c.req.query('month') || (new Date().getMonth() + 1).toString().padStart(2, '0');
   const includeTagged = c.req.query('includeTagged') === 'true';
@@ -212,7 +219,7 @@ app.get('/summary', async (c) => {
   // Fetch transactions
   const rawTransactions = await ncb.list<Transaction>('transactions', {
     where: {
-      household_id: HOUSEHOLD_ID,
+      household_id: householdId,
       transaction_date: { _gte: firstDay },
     },
     limit: 1000,
@@ -302,6 +309,9 @@ app.get('/summary', async (c) => {
  * Query params: months (default: 6)
  */
 app.get('/cost-trend', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const monthsParam = c.req.query('months') || '6';
   const months = parseInt(monthsParam);
 
@@ -315,7 +325,7 @@ app.get('/cost-trend', async (c) => {
 
   // Fetch all categories once
   const categories = await ncb.list<Category>('categories', {
-    where: { household_id: HOUSEHOLD_ID },
+    where: { household_id: householdId },
   });
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
 
@@ -334,7 +344,7 @@ app.get('/cost-trend', async (c) => {
     // Fetch transactions for the month
     const rawTransactions = await ncb.list<Transaction>('transactions', {
       where: {
-        household_id: HOUSEHOLD_ID,
+        household_id: householdId,
         transaction_date: { _gte: firstDay },
       },
       limit: 1000,
@@ -382,6 +392,9 @@ app.get('/cost-trend', async (c) => {
  * Export transactions as CSV (UTF-8 with BOM for Excel compatibility)
  */
 app.get('/export', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const year = c.req.query('year') || new Date().getFullYear().toString();
   const month = c.req.query('month') || (new Date().getMonth() + 1).toString().padStart(2, '0');
 
@@ -393,7 +406,7 @@ app.get('/export', async (c) => {
   // Fetch transactions for the month
   const rawTransactions = await ncb.list<Transaction>('transactions', {
     where: {
-      household_id: HOUSEHOLD_ID,
+      household_id: householdId,
       transaction_date: { _gte: firstDay },
     },
     order_by: { transaction_date: 'desc' },
@@ -406,7 +419,7 @@ app.get('/export', async (c) => {
 
   // Fetch all categories
   const categories = await ncb.list<Category>('categories', {
-    where: { household_id: HOUSEHOLD_ID },
+    where: { household_id: householdId },
   });
   const categoryMap = new Map(categories.map((c) => [c.id, c]));
 

@@ -8,8 +8,6 @@ import {
 } from '../lib/ncb.js';
 import { requireAdmin, type AuthUser } from '../middleware/auth.js';
 
-const HOUSEHOLD_ID = 1;
-
 const app = new Hono<{
   Variables: {
     user: AuthUser;
@@ -70,6 +68,9 @@ app.delete('/override', async (c) => {
  * Apply default burden ratio to all transactions for a month
  */
 app.post('/apply-default', async (c) => {
+  const user = c.get('user');
+  const householdId = user.householdId;
+
   const body = await c.req.json<{
     year: string;
     month: string;
@@ -82,7 +83,7 @@ app.post('/apply-default', async (c) => {
   // Get burden ratio for the month
   const ratios = await ncb.list<BurdenRatio>('burden_ratios', {
     where: {
-      household_id: HOUSEHOLD_ID,
+      household_id: householdId,
       effective_month: effectiveMonth,
     },
   });

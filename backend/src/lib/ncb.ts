@@ -353,6 +353,7 @@ export interface User {
   id: number;
   household_id: number;
   name: string;
+  email?: string;
 }
 
 export interface UserAlias {
