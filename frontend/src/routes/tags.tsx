@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useMemo } from 'react';
-import { useTags, useTransactions, useTransactionTags, useCategories } from '../lib/api';
+import { useTags, useTransactions, useTransactionTags, useCategories, useAssignTags, useUnassignTags } from '../lib/api';
 import { CalendarView, DayTransactionModal } from '../components/CalendarView';
 import type { Transaction } from '../lib/types';
 
@@ -25,7 +25,11 @@ function TagsPage() {
   const { data: categories = [] } = useCategories();
 
   const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id);
-  const { data: transactionTags = [] } = useTransactionTags(moneyforwardIds);
+  const { data: transactionTags = [], refetch: refetchTags } = useTransactionTags(moneyforwardIds);
+
+  // Mutations
+  const assignTags = useAssignTags();
+  const unassignTags = useUnassignTags();
 
   // Group transactions by tag
   const tagSummary = useMemo(() => {
@@ -86,23 +90,17 @@ function TagsPage() {
 
       // Execute additions
       for (const tagId of toAdd) {
-        // TODO: Implement bulk tag assignment API
-        await fetch(`/api/tags/assign`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tag_id: tagId, moneyforward_ids: [moneyforward_id] }),
-        });
+        await assignTags.mutateAsync({ tagId, moneyforwardIds: [moneyforward_id] });
       }
 
-      // Execute removals via API
+      // Execute removals
       for (const tagId of toRemove) {
-        await fetch(`/api/tags/unassign`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ tag_id: tagId, moneyforward_ids: [moneyforward_id] }),
-        });
+        await unassignTags.mutateAsync({ tagId, moneyforwardIds: [moneyforward_id] });
       }
     }
+
+    // Refetch tags to update UI
+    await refetchTags();
   };
 
   const years = Array.from({ length: 3 }, (_, i) => (now.getFullYear() - i).toString());

@@ -1,32 +1,13 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useMemo } from 'react';
-import { useQueries } from '@tanstack/react-query';
 import { LineChart, Line, XAxis, YAxis, Legend, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { useCategories, useUsers } from '../lib/api';
-import type { Transaction, MonthlySummary } from '../lib/types';
+import { useCategories, useUsers, useTransactions, useMonthlySummary } from '../lib/api';
 
 export const Route = createFileRoute('/comparison')({
   component: ComparisonPage,
 });
 
-const API_BASE = '/api';
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444'];
-
-async function fetchTransactions(year: string, month: string): Promise<Transaction[]> {
-  const res = await fetch(
-    `${API_BASE}/transactions?year=${year}&month=${month}&includeTagged=false`
-  );
-  if (!res.ok) throw new Error('Failed to fetch');
-  return res.json();
-}
-
-async function fetchSummary(year: string, month: string): Promise<MonthlySummary> {
-  const res = await fetch(
-    `${API_BASE}/transactions/summary?year=${year}&month=${month}&includeTagged=false`
-  );
-  if (!res.ok) throw new Error('Failed to fetch');
-  return res.json();
-}
 
 function ComparisonPage() {
   const { data: categories = [] } = useCategories();
@@ -47,20 +28,19 @@ function ComparisonPage() {
     return result.reverse();
   }, []);
 
-  // Fetch data for all months
-  const transactionQueries = useQueries({
-    queries: months.map((m) => ({
-      queryKey: ['transactions', m.year, m.month, false],
-      queryFn: () => fetchTransactions(m.year, m.month),
-    })),
-  });
+  // Fetch data for all months using hooks
+  const tx0 = useTransactions(months[0]?.year || '', months[0]?.month || '', false);
+  const tx1 = useTransactions(months[1]?.year || '', months[1]?.month || '', false);
+  const tx2 = useTransactions(months[2]?.year || '', months[2]?.month || '', false);
+  const tx3 = useTransactions(months[3]?.year || '', months[3]?.month || '', false);
 
-  const summaryQueries = useQueries({
-    queries: months.map((m) => ({
-      queryKey: ['monthly-summary', m.year, m.month, false],
-      queryFn: () => fetchSummary(m.year, m.month),
-    })),
-  });
+  const sum0 = useMonthlySummary(months[0]?.year || '', months[0]?.month || '', false);
+  const sum1 = useMonthlySummary(months[1]?.year || '', months[1]?.month || '', false);
+  const sum2 = useMonthlySummary(months[2]?.year || '', months[2]?.month || '', false);
+  const sum3 = useMonthlySummary(months[3]?.year || '', months[3]?.month || '', false);
+
+  const transactionQueries = [tx0, tx1, tx2, tx3];
+  const summaryQueries = [sum0, sum1, sum2, sum3];
 
   const isLoading = transactionQueries.some((q) => q.isLoading) || summaryQueries.some((q) => q.isLoading);
 

@@ -10,7 +10,7 @@ import {
   useUpdateBurdenRatio,
   useDeleteBurdenRatio,
   useUsers,
-  useQueryClient,
+  useAssignTags,
 } from '../lib/api';
 import type { Tag, BurdenRatio } from '../lib/types';
 
@@ -31,8 +31,8 @@ const TAG_COLORS = [
 ];
 
 function SettingsPage() {
-  const queryClient = useQueryClient();
   const { data: tags = [], isLoading } = useTags();
+  const assignTags = useAssignTags();
   const createTag = useCreateTag();
   const updateTag = useUpdateTag();
   const deleteTag = useDeleteTag();
@@ -272,28 +272,17 @@ function SettingsPage() {
     setBulkMessage('');
 
     try {
-      const res = await fetch('/api/tags/assign', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tag_id: bulkTagId, moneyforward_ids: ids }),
-      });
-
-      if (!res.ok) {
-        throw new Error('Failed to assign tags');
-      }
+      await assignTags.mutateAsync({ tagId: bulkTagId, moneyforwardIds: ids });
 
       setBulkStatus('success');
       setBulkMessage(`${ids.length}件の取引にタグを付与しました`);
       setBulkIds('');
       setBulkTagId(null);
-
-      // Invalidate relevant queries to refresh data
-      queryClient.invalidateQueries({ queryKey: ['transactionTags'] });
     } catch (err) {
       setBulkStatus('error');
       setBulkMessage(err instanceof Error ? err.message : 'タグの一括付与に失敗しました');
     }
-  }, [bulkTagId, bulkIds, queryClient]);
+  }, [bulkTagId, bulkIds, assignTags]);
 
   return (
     <div className="space-y-6">

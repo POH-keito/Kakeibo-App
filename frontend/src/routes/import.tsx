@@ -1,5 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useCallback } from 'react';
+import { useImportParse, useImportCategories, useImportExecute } from '../lib/api';
 
 export const Route = createFileRoute('/import')({
   component: ImportPage,
@@ -38,6 +39,11 @@ function ImportPage() {
   const [progress, setProgress] = useState(0);
   const [newCategoryTypes, setNewCategoryTypes] = useState<Record<string, string>>({});
 
+  // Mutations
+  const importParse = useImportParse();
+  const importCategories = useImportCategories();
+  const importExecute = useImportExecute();
+
   // Handle file upload
   const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
@@ -68,17 +74,7 @@ function ImportPage() {
 
     setError(null);
     try {
-      const res = await fetch('/api/import/parse', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ csvData: csvContent }),
-      });
-
-      if (!res.ok) {
-        throw new Error('CSV解析エラー');
-      }
-
-      const result = await res.json() as ImportResult;
+      const result = await importParse.mutateAsync(csvContent);
       setParseResult(result);
 
       // Initialize category types
@@ -90,7 +86,7 @@ function ImportPage() {
 
       setStep('preview');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'エラーが発生しました');
+      setError(err instanceof Error ? err.message : 'CSV解析エラー');
     }
   };
 
@@ -105,18 +101,12 @@ function ImportPage() {
         cost_type: newCategoryTypes[`${cat.major_name}|${cat.minor_name}`] || '変動',
       }));
 
-      const res = await fetch('/api/import/categories', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ categories }),
-      });
-
-      if (!res.ok) throw new Error('カテゴリ作成エラー');
+      await importCategories.mutateAsync(categories);
 
       // Re-parse to update
       await handleParse();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'エラーが発生しました');
+      setError(err instanceof Error ? err.message : 'カテゴリ作成エラー');
     }
   };
 
@@ -128,19 +118,11 @@ function ImportPage() {
     setProgress(0);
 
     try {
-      const res = await fetch('/api/import/execute', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transactions: parseResult.transactions }),
-      });
-
-      if (!res.ok) throw new Error('インポートエラー');
-
-      const result = await res.json();
+      const result = await importExecute.mutateAsync(parseResult.transactions);
       setImportResult(result);
       setStep('done');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'エラーが発生しました');
+      setError(err instanceof Error ? err.message : 'インポートエラー');
       setStep('preview');
     }
   };

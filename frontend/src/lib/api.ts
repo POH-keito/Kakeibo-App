@@ -71,6 +71,21 @@ async function fetchApi<T>(path: string, options?: RequestInit): Promise<T> {
   }
 }
 
+// Auth hook
+interface CurrentUser {
+  email: string;
+  role: 'admin' | 'viewer';
+}
+
+export function useCurrentUser() {
+  return useQuery({
+    queryKey: ['me'],
+    queryFn: () => fetchApi<CurrentUser>('/auth/me'),
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    gcTime: 30 * 60 * 1000,   // 30 minutes
+  });
+}
+
 // Master data hooks (low-frequency updates)
 export function useCategories() {
   return useQuery({
@@ -401,6 +416,214 @@ export function useAIAnalysis() {
         method: 'POST',
         body: JSON.stringify({ summary, month, history, userMessage }),
       }),
+  });
+}
+
+// Share management hooks
+export function useApplyDefaultRatio() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      year,
+      month,
+      moneyforwardIds,
+    }: {
+      year: string;
+      month: string;
+      moneyforwardIds: string[];
+    }) =>
+      fetchApi<{ success: boolean; updated: number }>('/shares/apply-default', {
+        method: 'POST',
+        body: JSON.stringify({
+          year,
+          month,
+          moneyforward_ids: moneyforwardIds,
+        }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transaction-shares'] });
+      queryClient.invalidateQueries({ queryKey: ['transaction-overrides'] });
+      queryClient.invalidateQueries({ queryKey: ['enriched-transactions'] });
+    },
+  });
+}
+
+export function useSaveOverridesBatch() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (overrides: Array<{
+      moneyforward_id: string;
+      user_id: number;
+      value: number;
+      override_type?: 'PERCENT' | 'FIXED_AMOUNT';
+    }>) =>
+      fetchApi<{ success: boolean; saved: number }>('/shares/save-batch', {
+        method: 'POST',
+        body: JSON.stringify({ overrides }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transaction-shares'] });
+      queryClient.invalidateQueries({ queryKey: ['transaction-overrides'] });
+      queryClient.invalidateQueries({ queryKey: ['enriched-transactions'] });
+    },
+  });
+}
+
+// Import hooks
+interface ParsedTransaction {
+  moneyforward_id: string;
+  transaction_date: string;
+  content: string;
+  amount: number;
+  major_name: string;
+  minor_name: string;
+  memo: string | null;
+  financial_institution: string;
+  is_calculation_target: boolean;
+  is_transfer: boolean;
+  processing_status: string;
+  applied_burden_ratio_id: number | null;
+  applied_exclusion_rule_id: number | null;
+}
+
+interface ImportParseResult {
+  created: number;
+  updated: number;
+  skipped: number;
+  newCategories: { major_name: string; minor_name: string }[];
+  transactions: ParsedTransaction[];
+}
+
+export function useImportParse() {
+  return useMutation({
+    mutationFn: (csvData: string) =>
+      fetchApi<ImportParseResult>('/import/parse', {
+        method: 'POST',
+        body: JSON.stringify({ csvData }),
+      }),
+  });
+}
+
+export function useImportCategories() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (categories: Array<{
+      major_name: string;
+      minor_name: string;
+      cost_type: string;
+    }>) =>
+      fetchApi<{ created: number }>('/import/categories', {
+        method: 'POST',
+        body: JSON.stringify({ categories }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['categories'] });
+    },
+  });
+}
+
+export function useImportExecute() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (transactions: ParsedTransaction[]) =>
+      fetchApi<{ created: number; updated: number }>('/import/execute', {
+        method: 'POST',
+        body: JSON.stringify({ transactions }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transactions'] });
+      queryClient.invalidateQueries({ queryKey: ['transaction-shares'] });
+    },
+  });
+}
+
+// Tag assignment hooks
+export function useAssignTags() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      tagId,
+      moneyforwardIds,
+    }: {
+      tagId: number;
+      moneyforwardIds: string[];
+    }) =>
+      fetchApi<{ success: boolean; assigned: number }>('/tags/assign', {
+        method: 'POST',
+        body: JSON.stringify({ tag_id: tagId, moneyforward_ids: moneyforwardIds }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transaction-tags'] });
+      queryClient.invalidateQueries({ queryKey: ['transactionTags'] });
+    },
+  });
+}
+
+export function useUnassignTags() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({
+      tagId,
+      moneyforwardIds,
+    }: {
+      tagId: number;
+      moneyforwardIds: string[];
+    }) =>
+      fetchApi<{ success: boolean; unassigned: number }>('/tags/unassign', {
+        method: 'POST',
+        body: JSON.stringify({ tag_id: tagId, moneyforward_ids: moneyforwardIds }),
+      }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transaction-tags'] });
+      queryClient.invalidateQueries({ queryKey: ['transactionTags'] });
+    },
+  });
+}
+
+// Sync tags (add/remove in single call by diffing)
+export function useSyncTransactionTags() {
+  const assignTags = useAssignTags();
+  const unassignTags = useUnassignTags();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (changes: Array<{ moneyforward_id: string; tag_ids: number[]; current_tag_ids: number[] }>) => {
+      const results: Array<{ success: boolean }> = [];
+
+      for (const { moneyforward_id, tag_ids, current_tag_ids } of changes) {
+        const currentSet = new Set(current_tag_ids);
+        const newSet = new Set(tag_ids);
+
+        // Tags to add
+        const toAdd = tag_ids.filter((id) => !currentSet.has(id));
+        // Tags to remove
+        const toRemove = current_tag_ids.filter((id) => !newSet.has(id));
+
+        // Execute additions
+        for (const tagId of toAdd) {
+          await assignTags.mutateAsync({ tagId, moneyforwardIds: [moneyforward_id] });
+        }
+
+        // Execute removals
+        for (const tagId of toRemove) {
+          await unassignTags.mutateAsync({ tagId, moneyforwardIds: [moneyforward_id] });
+        }
+
+        results.push({ success: true });
+      }
+
+      return results;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['transaction-tags'] });
+      queryClient.invalidateQueries({ queryKey: ['transactionTags'] });
+    },
   });
 }
 
