@@ -18,6 +18,9 @@ import type {
 
 const API_BASE = '/api';
 
+// Re-export useQueryClient for convenience
+export { useQueryClient };
+
 export class ApiError extends Error {
   constructor(
     public statusCode: number,

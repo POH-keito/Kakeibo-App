@@ -10,6 +10,7 @@ import {
   useUpdateBurdenRatio,
   useDeleteBurdenRatio,
   useUsers,
+  useQueryClient,
 } from '../lib/api';
 import type { Tag, BurdenRatio } from '../lib/types';
 
@@ -30,6 +31,7 @@ const TAG_COLORS = [
 ];
 
 function SettingsPage() {
+  const queryClient = useQueryClient();
   const { data: tags = [], isLoading } = useTags();
   const createTag = useCreateTag();
   const updateTag = useUpdateTag();
@@ -47,6 +49,12 @@ function SettingsPage() {
   const [editName, setEditName] = useState('');
   const [editColor, setEditColor] = useState('');
   const [error, setError] = useState<string | null>(null);
+
+  // Bulk tagging state
+  const [bulkTagId, setBulkTagId] = useState<number | null>(null);
+  const [bulkIds, setBulkIds] = useState('');
+  const [bulkStatus, setBulkStatus] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+  const [bulkMessage, setBulkMessage] = useState('');
 
   // Burden ratio state
   const [isCreatingRatio, setIsCreatingRatio] = useState(false);
@@ -234,6 +242,58 @@ function SettingsPage() {
       })
       .join(' / ');
   }, [users]);
+
+  // Bulk tagging handler
+  const handleBulkTag = useCallback(async () => {
+    if (!bulkTagId) {
+      setBulkStatus('error');
+      setBulkMessage('タグを選択してください');
+      return;
+    }
+
+    if (!bulkIds.trim()) {
+      setBulkStatus('error');
+      setBulkMessage('MoneyForward IDを入力してください');
+      return;
+    }
+
+    const ids = bulkIds
+      .split('\n')
+      .map((id) => id.trim())
+      .filter((id) => id);
+
+    if (ids.length === 0) {
+      setBulkStatus('error');
+      setBulkMessage('有効なIDが入力されていません');
+      return;
+    }
+
+    setBulkStatus('loading');
+    setBulkMessage('');
+
+    try {
+      const res = await fetch('/api/tags/assign', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tag_id: bulkTagId, moneyforward_ids: ids }),
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to assign tags');
+      }
+
+      setBulkStatus('success');
+      setBulkMessage(`${ids.length}件の取引にタグを付与しました`);
+      setBulkIds('');
+      setBulkTagId(null);
+
+      // Invalidate relevant queries to refresh data
+      queryClient.invalidateQueries({ queryKey: ['transactionTags'] });
+    } catch (err) {
+      setBulkStatus('error');
+      setBulkMessage(err instanceof Error ? err.message : 'タグの一括付与に失敗しました');
+    }
+  }, [bulkTagId, bulkIds, queryClient]);
 
   return (
     <div className="space-y-6">
@@ -512,6 +572,78 @@ function SettingsPage() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* Bulk Tagging Section */}
+      <div className="rounded-lg bg-white p-6 shadow">
+        <h3 className="mb-4 text-lg font-semibold">一括タグ付け</h3>
+        <p className="mb-4 text-sm text-gray-600">
+          MoneyForward IDを1行に1つずつ入力し、選択したタグを一括で付与します。
+        </p>
+
+        {/* Status Message */}
+        {bulkMessage && (
+          <div
+            className={`mb-4 rounded-lg p-4 ${
+              bulkStatus === 'success'
+                ? 'bg-green-50 text-green-700'
+                : bulkStatus === 'error'
+                ? 'bg-red-50 text-red-700'
+                : ''
+            }`}
+          >
+            {bulkMessage}
+          </div>
+        )}
+
+        <div className="space-y-4">
+          {/* Tag Selection */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              タグを選択
+            </label>
+            <select
+              value={bulkTagId ?? ''}
+              onChange={(e) => setBulkTagId(e.target.value ? Number(e.target.value) : null)}
+              className="w-full rounded border px-3 py-2"
+              disabled={bulkStatus === 'loading'}
+            >
+              <option value="">-- タグを選択 --</option>
+              {tags.map((tag) => (
+                <option key={tag.id} value={tag.id}>
+                  {tag.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* ID List */}
+          <div>
+            <label className="mb-1 block text-sm font-medium text-gray-700">
+              MoneyForward ID リスト
+            </label>
+            <textarea
+              rows={10}
+              placeholder={'IDを1行に1つずつ入力\n例:\nabc123...\ndef456...'}
+              value={bulkIds}
+              onChange={(e) => setBulkIds(e.target.value)}
+              className="w-full rounded border px-3 py-2 font-mono text-sm"
+              disabled={bulkStatus === 'loading'}
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              {bulkIds.split('\n').filter((id) => id.trim()).length}件のID
+            </p>
+          </div>
+
+          {/* Execute Button */}
+          <button
+            onClick={handleBulkTag}
+            disabled={bulkStatus === 'loading'}
+            className="rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:opacity-50"
+          >
+            {bulkStatus === 'loading' ? '処理中...' : 'タグを一括付与'}
+          </button>
+        </div>
       </div>
     </div>
   );
