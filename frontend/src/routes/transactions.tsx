@@ -31,6 +31,17 @@ function TransactionsPage() {
   const { data: users = [] } = useUsers();
   const { data: burdenRatio } = useBurdenRatio(year, month);
 
+  // Burden ratio display
+  const ratioDisplay = useMemo(() => {
+    if (!burdenRatio?.details || !users.length) return null;
+    return burdenRatio.details
+      .map((d) => {
+        const user = users.find((u) => u.id === d.user_id);
+        return `${user?.aliases[0] || user?.name}: ${d.ratio_percent}%`;
+      })
+      .join(' / ');
+  }, [burdenRatio, users]);
+
   // Filter transactions
   const filteredTransactions = useMemo(() => {
     if (includeExcluded) return transactions;
@@ -195,6 +206,12 @@ function TransactionsPage() {
     <div className="space-y-4">
       {/* Controls */}
       <div className="rounded-lg bg-white p-4 shadow">
+        {/* Default burden ratio info bar */}
+        {ratioDisplay && (
+          <div className="mb-4 rounded-lg bg-green-50 px-4 py-2 text-sm text-green-800">
+            今月のデフォルト按分: {ratioDisplay}
+          </div>
+        )}
         <div className="flex flex-wrap items-center gap-4">
           <div className="flex items-center gap-2">
             <select
