@@ -1,6 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useMemo } from 'react';
 import { useQueries } from '@tanstack/react-query';
+import { LineChart, Line, XAxis, YAxis, Legend, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
 import { useCategories, useUsers } from '../lib/api';
 import type { Transaction, MonthlySummary } from '../lib/types';
 
@@ -9,6 +10,7 @@ export const Route = createFileRoute('/comparison')({
 });
 
 const API_BASE = '/api';
+const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444'];
 
 async function fetchTransactions(year: string, month: string): Promise<Transaction[]> {
   const res = await fetch(
@@ -138,6 +140,19 @@ function ComparisonPage() {
     return result;
   }, [summaryQueries, months]);
 
+  // Transform data for line chart
+  const lineChartData = useMemo(() => {
+    return months.map(m => ({
+      month: m.label,
+      ...Object.fromEntries(
+        users.map(u => [
+          u.aliases[0] || u.name,
+          userSharesByMonth[u.id]?.[m.label] || 0
+        ])
+      )
+    }));
+  }, [months, users, userSharesByMonth]);
+
   if (isLoading) {
     return (
       <div className="flex h-64 items-center justify-center">
@@ -233,6 +248,30 @@ function ComparisonPage() {
       {/* User Shares Chart */}
       <div className="rounded-lg bg-white p-6 shadow">
         <h3 className="mb-4 text-lg font-semibold">ユーザー別負担推移</h3>
+
+        {/* Line Chart */}
+        <div className="mb-8 h-64">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={lineChartData}>
+              <CartesianGrid strokeDasharray="3 3" />
+              <XAxis dataKey="month" />
+              <YAxis tickFormatter={(v) => `¥${(v/1000).toFixed(0)}k`} />
+              <Tooltip formatter={(v) => `¥${Number(v).toLocaleString()}`} />
+              <Legend />
+              {users.map((user, idx) => (
+                <Line
+                  key={user.id}
+                  type="monotone"
+                  dataKey={user.aliases[0] || user.name}
+                  stroke={COLORS[idx % COLORS.length]}
+                  strokeWidth={2}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+
+        {/* Table */}
         <table className="w-full text-sm">
           <thead>
             <tr className="border-b">
