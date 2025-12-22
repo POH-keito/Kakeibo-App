@@ -18,13 +18,13 @@ kakeibo-app/
 │       ├── index.ts   # Entry point + AppType export
 │       ├── routes/    # API endpoints
 │       ├── middleware/ # Auth, etc.
-│       └── lib/       # NCB client, utilities
+│       └── lib/       # NCB client, business-logic
 │
 ├── frontend/          # React + Vite
 │   └── src/
 │       ├── routes/    # TanStack Router (file-based)
 │       ├── components/
-│       ├── lib/       # Hono RPC client
+│       ├── lib/       # API hooks (TanStack Query)
 │       └── main.tsx
 │
 └── tests/             # Playwright E2E tests
@@ -39,69 +39,69 @@ kakeibo-app/
 | Routing | TanStack Router |
 | State | TanStack Query |
 | Styling | Tailwind CSS 4 |
-| Type Safety | Hono RPC |
-| Database | NoCodeBackend |
+| Database | NoCodeBackend (NCB) |
 | Auth | Cloud Run IAP |
+
+### Data Flow
+
+```
+Frontend (React + TanStack Query)
+    ↓ fetch API hooks
+Backend (Hono)
+    ↓ REST API
+NoCodeBackend (NCB)
+```
 
 ## Development Commands
 
 ```bash
-# Install dependencies
-npm install
-
-# Start both backend and frontend
-npm run dev
-
-# Build for production
-npm run build
-
-# Run E2E tests
-npm run test:e2e
-
-# Generate test code with Playwright Codegen
-npm run test:codegen
+npm install           # Install dependencies
+npm run dev           # Start both backend and frontend
+npm run build         # Build for production
+npm run test:e2e      # Run E2E tests
+npm run test:e2e:ui   # Run E2E tests with UI
+npm run test:codegen  # Generate test code with Playwright Codegen
 ```
 
 ## Authentication
 
-Uses Cloud Run IAP headers for authentication:
+Uses Cloud Run IAP headers:
 - `X-Goog-Authenticated-User-Email`: User's email
 
-Roles (hardcoded):
+Roles:
 - **admin**: Full access (keito@fukushi.ma)
 - **viewer**: Dashboard views only (waka@fukushi.ma)
 
-In development, use `DEV_USER_EMAIL` environment variable.
+In development: `DEV_USER_EMAIL` environment variable.
+
+## Environment Variables
+
+```bash
+# NCB (NoCodeBackend)
+NCB_BASE_URL=https://ncb.fukushi.ma
+NCB_INSTANCE=<instance_id>
+NCB_API_KEY=<api_key>
+
+# Development
+DEV_USER_EMAIL=keito@fukushi.ma
+```
 
 ## Key Concepts
 
 - **按分 (Burden Ratio)**: Expense splitting between household members
 - **Processing Status**: `按分_家計` (household), `按分_{user}` (individual), `集計除外_*` (excluded)
-- **NCB (NoCodeBackend)**: REST API for database operations
+- **立替 (Tatekae)**: Reimbursement tracking - payer gets positive amount
+- **NCB**: NoCodeBackend REST API (Hasura-like query syntax)
 
-## API Pattern
+## Business Logic
 
-Hono RPC provides end-to-end type safety:
-
-```typescript
-// Backend
-const app = new Hono()
-  .get('/api/transactions', async (c) => {
-    return c.json(transactions);
-  });
-
-export type AppType = typeof app;
-
-// Frontend
-import { hc } from 'hono/client';
-import type { AppType } from '../../../backend/src/index.js';
-
-const client = hc<AppType>('/');
-const res = await client.api.transactions.$get();
-```
+All core business logic is in `backend/src/lib/business-logic.ts`:
+- `determineProcessingStatus()`: Transaction status determination
+- `calculateShares()`: Expense share calculation
+- `calculateMonthlySummary()`: Monthly aggregation with 3-level hierarchy
 
 ## Language Notes
 
-- UI text is in Japanese (日本語)
-- Code comments and variable names use English
+- UI text: Japanese (日本語)
+- Code: English
 - Category names: `大項目` (major), `中項目` (minor)
