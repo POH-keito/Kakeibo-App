@@ -89,6 +89,8 @@ export interface EnrichedTransaction extends Transaction {
 // Summary types
 export interface MonthlySummary {
   totalSpending: number;
+  byCategory: Record<string, number>;
+  byCostType: Record<string, number>;
   userShares: Record<number, number>;
   transactionCount: number;
 }

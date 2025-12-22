@@ -1,7 +1,7 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useMemo } from 'react';
 import { LineChart, Line, XAxis, YAxis, Legend, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { useCategories, useUsers, useTransactions, useMonthlySummary } from '../lib/api';
+import { useUsers, useMonthlySummary } from '../lib/api';
 
 export const Route = createFileRoute('/comparison')({
   component: ComparisonPage,
@@ -10,7 +10,6 @@ export const Route = createFileRoute('/comparison')({
 const COLORS = ['#2563eb', '#10b981', '#f59e0b', '#ef4444'];
 
 function ComparisonPage() {
-  const { data: categories = [] } = useCategories();
   const { data: users = [] } = useUsers();
 
   // Get last 4 months
@@ -28,77 +27,59 @@ function ComparisonPage() {
     return result.reverse();
   }, []);
 
-  // Fetch data for all months using hooks
-  const tx0 = useTransactions(months[0]?.year || '', months[0]?.month || '', false);
-  const tx1 = useTransactions(months[1]?.year || '', months[1]?.month || '', false);
-  const tx2 = useTransactions(months[2]?.year || '', months[2]?.month || '', false);
-  const tx3 = useTransactions(months[3]?.year || '', months[3]?.month || '', false);
-
+  // Fetch summary data for all months
   const sum0 = useMonthlySummary(months[0]?.year || '', months[0]?.month || '', false);
   const sum1 = useMonthlySummary(months[1]?.year || '', months[1]?.month || '', false);
   const sum2 = useMonthlySummary(months[2]?.year || '', months[2]?.month || '', false);
   const sum3 = useMonthlySummary(months[3]?.year || '', months[3]?.month || '', false);
 
-  const transactionQueries = [tx0, tx1, tx2, tx3];
   const summaryQueries = [sum0, sum1, sum2, sum3];
 
-  const isLoading = transactionQueries.some((q) => q.isLoading) || summaryQueries.some((q) => q.isLoading);
-  const isError = transactionQueries.some((q) => q.isError) || summaryQueries.some((q) => q.isError);
-  const errorMessage = [...transactionQueries, ...summaryQueries].find((q) => q.error)?.error?.message;
+  const isLoading = summaryQueries.some((q) => q.isLoading);
+  const isError = summaryQueries.some((q) => q.isError);
+  const errorMessage = summaryQueries.find((q) => q.error)?.error?.message;
 
-  // Calculate category totals for each month
+  // Category totals from backend summary (already filtered for 按分_家計)
   const categoryByMonth = useMemo(() => {
     const result: Record<string, Record<string, number>> = {};
 
-    transactionQueries.forEach((query, idx) => {
-      const transactions = query.data || [];
+    summaryQueries.forEach((query, idx) => {
+      const summary = query.data;
       const monthLabel = months[idx].label;
 
-      transactions
-        .filter((tx) => tx.processing_status === '按分_家計')
-        .forEach((tx) => {
-          const category = categories.find((c) => c.id === tx.category_id);
-          const majorName = category?.major_name || '未分類';
-
+      if (summary?.byCategory) {
+        Object.entries(summary.byCategory).forEach(([majorName, amount]) => {
           if (!result[majorName]) {
             result[majorName] = {};
           }
-          if (!result[majorName][monthLabel]) {
-            result[majorName][monthLabel] = 0;
-          }
-          result[majorName][monthLabel] += Math.abs(tx.amount);
+          result[majorName][monthLabel] = amount;
         });
+      }
     });
 
     return result;
-  }, [transactionQueries, categories, months]);
+  }, [summaryQueries, months]);
 
-  // Calculate cost type totals for each month
+  // Cost type totals from backend summary
   const costTypeByMonth = useMemo(() => {
     const result: Record<string, Record<string, number>> = {};
 
-    transactionQueries.forEach((query, idx) => {
-      const transactions = query.data || [];
+    summaryQueries.forEach((query, idx) => {
+      const summary = query.data;
       const monthLabel = months[idx].label;
 
-      transactions
-        .filter((tx) => tx.processing_status === '按分_家計')
-        .forEach((tx) => {
-          const category = categories.find((c) => c.id === tx.category_id);
-          const costType = category?.cost_type || '未分類';
-
+      if (summary?.byCostType) {
+        Object.entries(summary.byCostType).forEach(([costType, amount]) => {
           if (!result[costType]) {
             result[costType] = {};
           }
-          if (!result[costType][monthLabel]) {
-            result[costType][monthLabel] = 0;
-          }
-          result[costType][monthLabel] += Math.abs(tx.amount);
+          result[costType][monthLabel] = amount;
         });
+      }
     });
 
     return result;
-  }, [transactionQueries, categories, months]);
+  }, [summaryQueries, months]);
 
   // User shares by month
   const userSharesByMonth = useMemo(() => {
