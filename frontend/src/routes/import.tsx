@@ -39,6 +39,7 @@ function ImportPage() {
   const [progress, setProgress] = useState(0);
   const [newCategoryTypes, setNewCategoryTypes] = useState<Record<string, string>>({});
   const [previewTab, setPreviewTab] = useState<'detail' | 'pivot' | 'fullPivot'>('detail');
+  const [isDragging, setIsDragging] = useState(false);
 
   // Mutations
   const importParse = useImportParse();
@@ -84,15 +85,21 @@ function ImportPage() {
     };
   }, [parseResult?.transactions]);
 
-  // Handle file upload
-  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
+  // Process files (shared logic for both input and drop)
+  const processFiles = useCallback(async (files: FileList | File[]) => {
+    const fileArray = Array.from(files);
+    if (fileArray.length === 0) return;
 
     setError(null);
     let combinedContent = '';
 
-    for (const file of Array.from(files)) {
+    for (const file of fileArray) {
+      // Validate file type
+      if (!file.name.endsWith('.csv')) {
+        setError(`CSVファイルのみ対応しています: ${file.name}`);
+        return;
+      }
+
       try {
         // MoneyForward CSV is Shift-JIS encoded
         const buffer = await file.arrayBuffer();
@@ -107,6 +114,37 @@ function ImportPage() {
 
     setCsvContent(combinedContent);
   }, []);
+
+  // Handle file input change
+  const handleFileChange = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    await processFiles(files);
+  }, [processFiles]);
+
+  // Drag and drop handlers
+  const handleDragOver = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(true);
+  }, []);
+
+  const handleDragLeave = useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+  }, []);
+
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setIsDragging(false);
+
+    const files = e.dataTransfer.files;
+    if (files.length > 0) {
+      await processFiles(files);
+    }
+  }, [processFiles]);
 
   // Parse CSV
   const handleParse = async () => {
@@ -187,26 +225,66 @@ function ImportPage() {
 
       {step === 'upload' && (
         <div className="rounded-lg bg-white p-6 shadow">
-          <h3 className="mb-4 text-lg font-semibold">CSVファイルを選択</h3>
+          <h3 className="mb-4 text-lg font-semibold">CSVファイルをアップロード</h3>
           <p className="mb-4 text-sm text-gray-600">
-            MoneyForward からエクスポートした CSV ファイルを選択してください。
-            複数ファイルを同時に選択できます。
+            MoneyForward からエクスポートした CSV ファイルをドラッグ&ドロップするか、
+            クリックして選択してください。複数ファイルに対応しています。
           </p>
 
           <div className="space-y-4">
-            <input
-              type="file"
-              accept=".csv"
-              multiple
-              onChange={handleFileChange}
-              className="block w-full rounded border p-2"
-            />
+            {/* Drop zone */}
+            <div
+              onDragOver={handleDragOver}
+              onDragLeave={handleDragLeave}
+              onDrop={handleDrop}
+              className={`relative rounded-lg border-2 border-dashed p-8 text-center transition-colors ${
+                isDragging
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-300 hover:border-gray-400'
+              }`}
+            >
+              <input
+                type="file"
+                accept=".csv"
+                multiple
+                onChange={handleFileChange}
+                className="absolute inset-0 cursor-pointer opacity-0"
+              />
+              <div className="pointer-events-none">
+                <svg
+                  className={`mx-auto h-12 w-12 ${isDragging ? 'text-blue-500' : 'text-gray-400'}`}
+                  stroke="currentColor"
+                  fill="none"
+                  viewBox="0 0 48 48"
+                >
+                  <path
+                    d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02"
+                    strokeWidth={2}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                <p className={`mt-2 text-sm ${isDragging ? 'text-blue-600' : 'text-gray-600'}`}>
+                  {isDragging
+                    ? 'ここにドロップしてください'
+                    : 'CSVファイルをドラッグ&ドロップ、またはクリックして選択'}
+                </p>
+                <p className="mt-1 text-xs text-gray-500">
+                  複数ファイル対応（Shift-JIS / UTF-8）
+                </p>
+              </div>
+            </div>
 
             {csvContent && (
-              <div className="rounded bg-gray-50 p-4">
-                <p className="text-sm text-gray-600">
-                  ファイル読み込み完了 ({csvContent.split('\n').length - 1} 行)
-                </p>
+              <div className="rounded bg-green-50 border border-green-200 p-4">
+                <div className="flex items-center gap-2">
+                  <svg className="h-5 w-5 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                  </svg>
+                  <p className="text-sm font-medium text-green-800">
+                    ファイル読み込み完了（{csvContent.split('\n').length - 1} 行）
+                  </p>
+                </div>
                 <button
                   onClick={handleParse}
                   className="mt-4 rounded bg-blue-600 px-4 py-2 text-white hover:bg-blue-700"
