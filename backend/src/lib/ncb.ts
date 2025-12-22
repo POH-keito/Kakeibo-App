@@ -288,6 +288,44 @@ class NCBClient {
 // Singleton instance
 export const ncb = new NCBClient();
 
+/**
+ * Utility function to create a delay
+ */
+export function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Execute batch requests in parallel with controlled concurrency
+ * to respect API rate limits (NCB: 20 req/10 sec)
+ *
+ * @param batches - Array of batch data to process
+ * @param fetchFn - Function to execute for each batch
+ * @param concurrency - Max concurrent requests (default: 5)
+ * @returns Promise with all results
+ */
+export async function parallelBatchFetch<TBatch, TResult>(
+  batches: TBatch[],
+  fetchFn: (batch: TBatch) => Promise<TResult[]>,
+  concurrency = 5
+): Promise<TResult[]> {
+  const results: TResult[] = [];
+
+  // Execute batches with controlled concurrency
+  const promises = batches.map((batch, i) =>
+    delay(Math.floor(i / concurrency) * 500).then(() => fetchFn(batch))
+  );
+
+  const batchResults = await Promise.all(promises);
+
+  // Flatten results
+  for (const result of batchResults) {
+    results.push(...result);
+  }
+
+  return results;
+}
+
 // Type definitions for database tables
 export interface Transaction {
   id: number;

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import {
   ncb,
+  parallelBatchFetch,
   type Transaction,
   type TransactionShare,
   type TransactionShareOverride,
@@ -54,14 +55,17 @@ app.get('/', async (c) => {
     if (moneyforwardIds.length > 0) {
       // Batch the IDs to avoid URL length issues (NCB has ~2000 char limit)
       const batchSize = 50;
-      const allTags: TransactionTag[] = [];
+      const batches: string[][] = [];
       for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
-        const batch = moneyforwardIds.slice(i, i + batchSize);
-        const tags = await ncb.list<TransactionTag>('transaction_tags', {
-          where: { moneyforward_id: { _in: batch } },
-        });
-        allTags.push(...tags);
+        batches.push(moneyforwardIds.slice(i, i + batchSize));
       }
+
+      const allTags = await parallelBatchFetch(batches, (batch) =>
+        ncb.list<TransactionTag>('transaction_tags', {
+          where: { moneyforward_id: { _in: batch } },
+        })
+      );
+
       const taggedMfIds = new Set(allTags.map((tt) => tt.moneyforward_id.trim()));
       transactions = transactions.filter((tx) => !taggedMfIds.has(tx.moneyforward_id.trim()));
     }
@@ -87,15 +91,16 @@ app.get('/shares', async (c) => {
 
   // Batch IDs to avoid URL length issues
   const batchSize = 50;
-  const allShares: TransactionShare[] = [];
-
+  const batches: string[][] = [];
   for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
-    const batch = moneyforwardIds.slice(i, i + batchSize);
-    const shares = await ncb.list<TransactionShare>('transaction_shares', {
-      where: { moneyforward_id: { _in: batch } },
-    });
-    allShares.push(...shares);
+    batches.push(moneyforwardIds.slice(i, i + batchSize));
   }
+
+  const allShares = await parallelBatchFetch(batches, (batch) =>
+    ncb.list<TransactionShare>('transaction_shares', {
+      where: { moneyforward_id: { _in: batch } },
+    })
+  );
 
   return c.json(allShares);
 });
@@ -116,15 +121,16 @@ app.get('/overrides', async (c) => {
   }
 
   const batchSize = 50;
-  const allOverrides: TransactionShareOverride[] = [];
-
+  const batches: string[][] = [];
   for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
-    const batch = moneyforwardIds.slice(i, i + batchSize);
-    const overrides = await ncb.list<TransactionShareOverride>('transaction_share_overrides', {
-      where: { moneyforward_id: { _in: batch } },
-    });
-    allOverrides.push(...overrides);
+    batches.push(moneyforwardIds.slice(i, i + batchSize));
   }
+
+  const allOverrides = await parallelBatchFetch(batches, (batch) =>
+    ncb.list<TransactionShareOverride>('transaction_share_overrides', {
+      where: { moneyforward_id: { _in: batch } },
+    })
+  );
 
   return c.json(allOverrides);
 });
@@ -145,15 +151,16 @@ app.get('/tags', async (c) => {
   }
 
   const batchSize = 50;
-  const allTags: TransactionTag[] = [];
-
+  const batches: string[][] = [];
   for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
-    const batch = moneyforwardIds.slice(i, i + batchSize);
-    const tags = await ncb.list<TransactionTag>('transaction_tags', {
-      where: { moneyforward_id: { _in: batch } },
-    });
-    allTags.push(...tags);
+    batches.push(moneyforwardIds.slice(i, i + batchSize));
   }
+
+  const allTags = await parallelBatchFetch(batches, (batch) =>
+    ncb.list<TransactionTag>('transaction_tags', {
+      where: { moneyforward_id: { _in: batch } },
+    })
+  );
 
   return c.json(allTags);
 });
@@ -220,14 +227,17 @@ app.get('/summary', async (c) => {
     const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id.trim());
     // Batch the IDs to avoid URL length issues
     const batchSize = 50;
-    const allTags: TransactionTag[] = [];
+    const batches: string[][] = [];
     for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
-      const batch = moneyforwardIds.slice(i, i + batchSize);
-      const tags = await ncb.list<TransactionTag>('transaction_tags', {
-        where: { moneyforward_id: { _in: batch } },
-      });
-      allTags.push(...tags);
+      batches.push(moneyforwardIds.slice(i, i + batchSize));
     }
+
+    const allTags = await parallelBatchFetch(batches, (batch) =>
+      ncb.list<TransactionTag>('transaction_tags', {
+        where: { moneyforward_id: { _in: batch } },
+      })
+    );
+
     const taggedMfIds = new Set(allTags.map((tt) => tt.moneyforward_id.trim()));
     transactions = transactions.filter((tx) => !taggedMfIds.has(tx.moneyforward_id.trim()));
   }
@@ -247,22 +257,23 @@ app.get('/summary', async (c) => {
   if (moneyforwardIds.length > 0) {
     // Batch the IDs to avoid URL length issues
     const batchSize = 50;
-    const shares: TransactionShare[] = [];
-    const overrides: TransactionShareOverride[] = [];
-
+    const batches: string[][] = [];
     for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
-      const batch = moneyforwardIds.slice(i, i + batchSize);
-      const [batchShares, batchOverrides] = await Promise.all([
+      batches.push(moneyforwardIds.slice(i, i + batchSize));
+    }
+
+    const [shares, overrides] = await Promise.all([
+      parallelBatchFetch(batches, (batch) =>
         ncb.list<TransactionShare>('transaction_shares', {
           where: { moneyforward_id: { _in: batch } },
-        }),
+        })
+      ),
+      parallelBatchFetch(batches, (batch) =>
         ncb.list<TransactionShareOverride>('transaction_share_overrides', {
           where: { moneyforward_id: { _in: batch } },
-        }),
-      ]);
-      shares.push(...batchShares);
-      overrides.push(...batchOverrides);
-    }
+        })
+      ),
+    ]);
 
     // Create override lookup (prefer overrides over shares)
     const overrideMap = new Map<string, number>();
@@ -406,19 +417,26 @@ app.get('/export', async (c) => {
 
   if (moneyforwardIds.length > 0) {
     const batchSize = 50;
+    const batches: string[][] = [];
     for (let i = 0; i < moneyforwardIds.length; i += batchSize) {
-      const batch = moneyforwardIds.slice(i, i + batchSize);
-      const [shares, tags] = await Promise.all([
+      batches.push(moneyforwardIds.slice(i, i + batchSize));
+    }
+
+    const [shares, tags] = await Promise.all([
+      parallelBatchFetch(batches, (batch) =>
         ncb.list<TransactionShare>('transaction_shares', {
           where: { moneyforward_id: { _in: batch } },
-        }),
+        })
+      ),
+      parallelBatchFetch(batches, (batch) =>
         ncb.list<TransactionTag>('transaction_tags', {
           where: { moneyforward_id: { _in: batch } },
-        }),
-      ]);
-      allShares.push(...shares);
-      allTags.push(...tags);
-    }
+        })
+      ),
+    ]);
+
+    allShares.push(...shares);
+    allTags.push(...tags);
   }
 
   // Create lookup maps
