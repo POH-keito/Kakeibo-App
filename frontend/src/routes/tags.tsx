@@ -1,6 +1,6 @@
 import { createFileRoute } from '@tanstack/react-router';
 import { useState, useMemo } from 'react';
-import { useTags, useTransactions, useTransactionTags, useCategories, useAssignTags, useUnassignTags, useCreateTag, useUpdateTag, useDeleteTag } from '../lib/api';
+import { useTags, useTransactions, useTransactionTags, useCategories, useAssignTags, useUnassignTags, useCreateTag, useUpdateTag, useDeleteTag, useBurdenRatio, useUsers } from '../lib/api';
 import { CalendarView, DayTransactionModal } from '../components/CalendarView';
 import type { Transaction } from '../lib/types';
 
@@ -35,9 +35,22 @@ function TagsPage() {
   const { data: tags = [], refetch: refetchTagsList } = useTags();
   const { data: transactions = [], isLoading } = useTransactions(year, month, true);
   const { data: categories = [] } = useCategories();
+  const { data: burdenRatio } = useBurdenRatio(year, month);
+  const { data: users = [] } = useUsers();
 
   const moneyforwardIds = transactions.map((tx) => tx.moneyforward_id);
   const { data: transactionTags = [], refetch: refetchTags } = useTransactionTags(moneyforwardIds);
+
+  // Burden ratio display
+  const ratioDisplay = useMemo(() => {
+    if (!burdenRatio?.details || !users.length) return null;
+    return burdenRatio.details
+      .map((d) => {
+        const user = users.find((u) => u.id === d.user_id);
+        return `${user?.aliases[0] || user?.name}: ${d.ratio_percent}%`;
+      })
+      .join(' / ');
+  }, [burdenRatio, users]);
 
   // Mutations
   const assignTags = useAssignTags();
@@ -216,7 +229,14 @@ function TagsPage() {
       <h2 className="text-2xl font-bold text-gray-900">タグ別集計</h2>
 
       {/* Controls */}
-      <div className="flex items-center justify-between rounded-lg bg-white p-4 shadow">
+      <div className="rounded-lg bg-white p-4 shadow">
+        {/* Default burden ratio info bar */}
+        {ratioDisplay && (
+          <div className="mb-4 rounded-lg bg-green-50 px-4 py-2 text-sm text-green-800">
+            今月のデフォルト按分: {ratioDisplay}
+          </div>
+        )}
+        <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <select
             value={year}
@@ -280,6 +300,7 @@ function TagsPage() {
           >
             タグの編集
           </button>
+        </div>
         </div>
       </div>
 
