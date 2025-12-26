@@ -51,13 +51,13 @@ app.get('/', zValidator('query', yearMonthQuerySchema), async (c) => {
   const rawTransactions = await ncb.list<Transaction>('transactions', {
     where: {
       household_id: householdId,
-      transaction_date: { _gte: firstDay },
+      transaction_date: { _gte: firstDay, _lt: nextMonthFirstDay },
     },
     order_by: { transaction_date: 'desc' },
     limit: 1000,
   });
 
-  // Client-side date filtering (NCB API limitation workaround)
+  // Client-side date filtering kept for safety
   let transactions = rawTransactions.filter(
     (tx) => tx.transaction_date >= firstDay && tx.transaction_date < nextMonthFirstDay
   );
@@ -235,7 +235,7 @@ app.get('/summary', zValidator('query', yearMonthQuerySchema), async (c) => {
     ncb.list<Transaction>('transactions', {
       where: {
         household_id: householdId,
-        transaction_date: { _gte: firstDay },
+        transaction_date: { _gte: firstDay, _lt: nextMonthFirstDay },
       },
       limit: 1000,
     }),
@@ -479,7 +479,7 @@ app.get('/cost-trend', async (c) => {
     const rawTransactions = await ncb.list<Transaction>('transactions', {
       where: {
         household_id: householdId,
-        transaction_date: { _gte: firstDay },
+        transaction_date: { _gte: firstDay, _lt: nextMonthFirstDay },
       },
       limit: 1000,
     });
@@ -541,7 +541,7 @@ app.get('/export', async (c) => {
   const rawTransactions = await ncb.list<Transaction>('transactions', {
     where: {
       household_id: householdId,
-      transaction_date: { _gte: firstDay },
+      transaction_date: { _gte: firstDay, _lt: nextMonthFirstDay },
     },
     order_by: { transaction_date: 'desc' },
     limit: 1000,
