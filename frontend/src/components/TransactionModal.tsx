@@ -33,33 +33,36 @@ export function TransactionModal({
     if (!filterContext) return true;
 
     const category = categories.find((c) => c.id === tx.category_id);
-    if (!category) return false;
+    // Default values when no category (matching backend logic)
+    const costType = category?.cost_type || '変動';
+    const majorName = category?.major_name || '未分類';
+    const minorName = category?.minor_name || '未分類';
 
     switch (filterContext.type) {
       case 'category':
         if (filterContext.minorName) {
           return (
-            category.major_name === filterContext.majorName &&
-            category.minor_name === filterContext.minorName
+            majorName === filterContext.majorName &&
+            minorName === filterContext.minorName
           );
         }
-        return category.major_name === filterContext.majorName;
+        return majorName === filterContext.majorName;
 
       case 'costType':
         if (filterContext.minorName) {
           return (
-            category.cost_type === filterContext.costType &&
-            category.major_name === filterContext.majorName &&
-            category.minor_name === filterContext.minorName
+            costType === filterContext.costType &&
+            majorName === filterContext.majorName &&
+            minorName === filterContext.minorName
           );
         }
         if (filterContext.majorName) {
           return (
-            category.cost_type === filterContext.costType &&
-            category.major_name === filterContext.majorName
+            costType === filterContext.costType &&
+            majorName === filterContext.majorName
           );
         }
-        return category.cost_type === filterContext.costType;
+        return costType === filterContext.costType;
 
       default:
         return true;
